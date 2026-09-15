@@ -109,5 +109,54 @@ export const COLLIDERS = [
 
 export const HALL_BOUNDS = { x: 14.6, zMin: -11.4, zMax: 11.2 };
 
+// ─── ball physics solids ─────────────────────────────────────────────────────
+// The ball flies, so it needs real 3D volumes: boxes and upright cylinders
+// with a height range (y0 → y1), measured from the meshes HallScene builds.
+// Keep in sync when furniture moves — lib/ball-physics.ts collides against
+// exactly this list, on every client, so every screen agrees.
+export type Solid =
+  | { shape: "box"; x: number; z: number; hx: number; hz: number; y0: number; y1: number }
+  | { shape: "cyl"; x: number; z: number; r: number; y0: number; y1: number };
+
+export const SOLIDS: Solid[] = [
+  // sofa (group at z = 7): seat + cushions, backrest, rounded arms
+  { shape: "box", x: 0, z: 7.0, hx: 3.06, hz: 0.72, y0: 0, y1: 1.28 },
+  { shape: "box", x: 0, z: 7.62, hx: 3.06, hz: 0.2, y0: 0, y1: 1.7 },
+  { shape: "cyl", x: -2.7, z: 7.0, r: 0.36, y0: 0, y1: 1.66 },
+  { shape: "cyl", x: 2.7, z: 7.0, r: 0.36, y0: 0, y1: 1.66 },
+  // coffee table — too low to roll under, so solid to the top
+  { shape: "cyl", x: 0, z: 3.0, r: 1.4, y0: 0, y1: 0.61 },
+  // TV stand + the TV itself hanging above it
+  { shape: "box", x: 0, z: -10.8, hx: 3.2, hz: 0.45, y0: 0, y1: 0.6 },
+  { shape: "box", x: 0, z: -11.2, hx: 2.6, hz: 0.1, y0: 1.65, y1: 4.55 },
+  // bookshelf
+  { shape: "box", x: 8.5, z: -11.9, hx: 1.7, hz: 0.35, y0: 0, y1: 3.6 },
+  // potted plants (pot + foliage)
+  { shape: "cyl", x: -12.5, z: 3.5, r: 0.62, y0: 0, y1: 1.75 },
+  { shape: "cyl", x: 11.5, z: -9.5, r: 0.62, y0: 0, y1: 1.75 },
+  { shape: "cyl", x: -11, z: -9, r: 0.62, y0: 0, y1: 1.75 },
+  // floor lamps: thin pole + shade overhead
+  { shape: "cyl", x: 11.5, z: 3.5, r: 0.09, y0: 0, y1: 2.4 },
+  { shape: "cyl", x: 11.5, z: 3.5, r: 0.7, y0: 2.17, y1: 2.93 },
+  { shape: "cyl", x: -13.8, z: 0.5, r: 0.09, y0: 0, y1: 2.4 },
+  { shape: "cyl", x: -13.8, z: 0.5, r: 0.7, y0: 2.17, y1: 2.93 },
+  // squishy floor cushions
+  { shape: "cyl", x: -4.2, z: 1.2, r: 0.72, y0: 0, y1: 0.6 },
+  { shape: "cyl", x: 4.2, z: 1.6, r: 0.72, y0: 0, y1: 0.6 },
+  // RPS arena: felt table, two stools, scoreboard post + board
+  { shape: "cyl", x: -10, z: -6.5, r: 1.15, y0: 0, y1: 0.86 },
+  { shape: "cyl", x: -11.3, z: -5.2, r: 0.42, y0: 0, y1: 0.61 },
+  { shape: "cyl", x: -8.7, z: -7.8, r: 0.42, y0: 0, y1: 0.61 },
+  { shape: "box", x: -12.9, z: -6.5, hx: 0.14, hz: 0.14, y0: 0, y1: 1.35 },
+  { shape: "box", x: -12.9, z: -6.5, hx: 1.25, hz: 0.08, y0: 1.35, y1: 3.05 },
+  // emergency button pedestal + dome
+  { shape: "cyl", x: 5.0, z: -10.0, r: 0.52, y0: 0, y1: 1.45 },
+];
+
+// Where the ball can travel (open camera side included) and where it rests
+// when the hall first wakes up — clear of every solid above.
+export const BALL_BOUNDS = { xMin: -14.4, xMax: 14.4, zMin: -11.2, zMax: 11 };
+export const BALL_SPAWN = { x: 2.8, z: 0.2 };
+
 // Where admin-added frames land by default (on the big back wall).
 export const NEXT_FRAME_SLOT = { x: -10, y: 4.6, z: -12.32, dx: 4 };

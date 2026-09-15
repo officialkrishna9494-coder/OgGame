@@ -23,7 +23,15 @@ const handle = app.getRequestHandler();
 // Single-hall state (multi-room = prefix keys if you grow beyond one hall)
 const players = new Map(); // socketId -> PlayerState
 const meta = new Map(); // socketId -> { name, color }
-let ball = { x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null };
+// resting spot clear of every furniture solid (mirrors BALL_SPAWN in lib/room-defaults)
+const BALL_SPAWN = (() => {
+  try {
+    return require("./lib/room-defaults").BALL_SPAWN;
+  } catch {
+    return { x: 2.8, z: 0.2 };
+  }
+})();
+let ball = { x: BALL_SPAWN.x, z: BALL_SPAWN.z, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null };
 let tv = { playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: Date.now() };
 // watch-party drive cooldown (shared across all sockets — see hall:tv)
 let lastTvDriveAt = 0;
@@ -503,9 +511,26 @@ app.prepare().then(() => {
 
     socket.on("disconnect", () => {
       const m = meta.get(socket.id);
+      const leaving = players.get(socket.id);
       players.delete(socket.id);
       meta.delete(socket.id);
-      if (ball.holderId === socket.id) ball.holderId = null;
+      if (ball.holderId === socket.id) {
+        // drop it from their hands where they stood — not back at the spot
+        // it was picked up from (clients push it clear of any furniture)
+        const f = leaving ? Number(leaving.facing) || 0 : 0;
+        ball = {
+          ...ball,
+          holderId: null,
+          throwerId: null,
+          thrownAt: 0,
+          x: leaving ? leaving.x + Math.sin(f) * 0.55 : ball.x,
+          z: leaving ? leaving.z + Math.cos(f) * 0.55 : ball.z,
+          y: leaving ? 0.85 : ball.y,
+          vx: 0,
+          vy: 0,
+          vz: 0,
+        };
+      }
       // RPS: a vanishing duelist forfeits (or voids an unstarted table)
       if (rps.seats.a === socket.id || rps.seats.b === socket.id) {
         if (rps.status === "waiting") {

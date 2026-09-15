@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { BallState, ContextState, GameState, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
 import { IDLE_CONTEXT } from "../lib/hall-types";
+import { ejectBall, handPoint, PICKUP_RADIUS, reachField, stepBall } from "../lib/ball-physics";
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
@@ -1168,6 +1169,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
 
     // ball physics (local authority when held / recently tossed)
     const ballPhys: BallState = { ...stateRef.current.ball };
+    ejectBall(ballPhys);
+    const hand = { x: 0, y: 0, z: 0 }; // scratch for carried-ball placement
     let lastNetBall = JSON.stringify(ballPhys);
     let lastMoveSent = 0;
     let lastMoveFlag = "";
@@ -1318,44 +1321,34 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           ballPhys.vy = netBall.vy;
           ballPhys.vz = netBall.vz;
           ballPhys.holderId = null;
+          ejectBall(ballPhys);
         }
       }
       if (held) {
         ballPhys.holderId = MY_ID;
         ballPhys.vx = ballPhys.vy = ballPhys.vz = 0;
-        ballPhys.x = me.x + Math.sin(me.facing) * 0.55;
-        ballPhys.z = me.z + Math.cos(me.facing) * 0.55;
-        ballPhys.y = 0.85 + me.y;
+        handPoint(me.x, me.y, me.z, me.facing, hand);
+        ballPhys.x = hand.x;
+        ballPhys.y = hand.y;
+        ballPhys.z = hand.z;
       } else if (netHolder && st.players[netHolder]) {
         // friend is holding it — glide to their hand (always visible now)
         const holder = st.players[netHolder];
         ballPhys.holderId = netHolder;
-        ballPhys.x += (holder.x + Math.sin(holder.facing) * 0.55 - ballPhys.x) * Math.min(1, dt * 10);
-        ballPhys.z += (holder.z + Math.cos(holder.facing) * 0.55 - ballPhys.z) * Math.min(1, dt * 10);
-        ballPhys.y += (0.85 - ballPhys.y) * Math.min(1, dt * 10);
+        handPoint(holder.x, 0, holder.z, holder.facing, hand);
+        const k = Math.min(1, dt * 10);
+        ballPhys.x += (hand.x - ballPhys.x) * k;
+        ballPhys.z += (hand.z - ballPhys.z) * k;
+        ballPhys.y += (hand.y - ballPhys.y) * k;
       } else {
         ballPhys.holderId = null;
-        ballPhys.vy -= 16 * dt;
-        ballPhys.x += ballPhys.vx * dt;
-        ballPhys.z += ballPhys.vz * dt;
-        ballPhys.y += ballPhys.vy * dt;
-        if (ballPhys.y < 0.28) {
-          ballPhys.y = 0.28;
-          ballPhys.vy *= -0.55;
-          ballPhys.vx *= 0.8;
-          ballPhys.vz *= 0.8;
-          if (Math.abs(ballPhys.vy) < 0.8) ballPhys.vy = 0;
-        }
-        ballPhys.vx *= Math.exp(-0.6 * dt);
-        ballPhys.vz *= Math.exp(-0.6 * dt);
-        if (ballPhys.x < -14.4 || ballPhys.x > 14.4) ballPhys.vx *= -0.7;
-        if (ballPhys.z < -11.2 || ballPhys.z > 11) ballPhys.vz *= -0.7;
-        ballPhys.x = Math.max(-14.4, Math.min(14.4, ballPhys.x));
-        ballPhys.z = Math.max(-11.2, Math.min(11, ballPhys.z));
+        // sphere vs the hall's furniture (lib/ball-physics) — bounces off,
+        // lands on and rolls off solids; never passes into them
+        stepBall(ballPhys, dt);
         // pickup
         const d = Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z);
         const speed = Math.hypot(ballPhys.vx, ballPhys.vz);
-        if (d < 0.65 && ballPhys.y < 0.9 && speed < 3 && !sitting) {
+        if (d < PICKUP_RADIUS && ballPhys.y < 0.9 && speed < 3 && !sitting) {
           ballPhys.holderId = MY_ID;
           ballPhys.throwerId = null;
           ballPhys.thrownAt = 0;
@@ -1642,32 +1635,20 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       const rawH = st.ball.holderId ?? null;
       const renderHolder = rawH && st.mySocketId !== "" && rawH === st.mySocketId ? MY_ID : rawH;
       if (renderHolder === MY_ID) {
-        ballMesh.position.set(
-          me.x + Math.sin(me.facing) * 0.55,
-          0.85 + me.y,
-          me.z + Math.cos(me.facing) * 0.55
-        );
+        handPoint(me.x, me.y, me.z, me.facing, hand);
+        ballMesh.position.set(hand.x, hand.y, hand.z);
       } else if (renderHolder && st.players[renderHolder]) {
         // Ride the holder's INTERPOLATED rig (smoothed every frame like the
         // character itself) — never the raw 12Hz network pos. That's what
         // was making the carried ball judder on remote screens.
         const rig = rigs.get(renderHolder);
         if (rig) {
-          const fx = Math.sin(rig.group.rotation.y) * 0.55;
-          const fz = Math.cos(rig.group.rotation.y) * 0.55;
-          ballMesh.position.set(
-            rig.group.position.x + fx,
-            rig.group.position.y + 0.85,
-            rig.group.position.z + fz
-          );
+          handPoint(rig.group.position.x, rig.group.position.y, rig.group.position.z, rig.group.rotation.y, hand);
         } else {
           const h = st.players[renderHolder];
-          ballMesh.position.set(
-            h.x + Math.sin(h.facing) * 0.55,
-            0.85,
-            h.z + Math.cos(h.facing) * 0.55
-          );
+          handPoint(h.x, 0, h.z, h.facing, hand);
         }
+        ballMesh.position.set(hand.x, hand.y, hand.z);
       } else {
         ballMesh.position.set(ballPhys.x, ballPhys.y, ballPhys.z);
       }
@@ -1810,9 +1791,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       if (ballPhys.holderId === MY_ID || Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z) < 1.2) {
         const f = me.facing;
         ballPhys.holderId = null;
-        ballPhys.x = me.x + Math.sin(f) * 0.6;
-        ballPhys.z = me.z + Math.cos(f) * 0.6;
-        ballPhys.y = 1.0 + me.y;
+        handPoint(me.x, me.y, me.z, f, hand, 0.6, 1.0);
+        ballPhys.x = hand.x;
+        ballPhys.z = hand.z;
+        ballPhys.y = hand.y;
         ballPhys.vx = Math.sin(f) * 5.5;
         ballPhys.vz = Math.cos(f) * 5.5;
         ballPhys.vy = 4.6;
@@ -1913,8 +1895,20 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
 
     animate();
 
+    // build the ball's "never out of reach" map while the hall is idle,
+    // so the first time the ball settles never costs a frame
+    const idle = window as Window & {
+      requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const warmId = idle.requestIdleCallback
+      ? idle.requestIdleCallback(() => reachField(), { timeout: 2500 })
+      : window.setTimeout(() => reachField(), 1200);
+
     return () => {
       dead = true;
+      if (idle.cancelIdleCallback) idle.cancelIdleCallback(warmId);
+      else window.clearTimeout(warmId);
       hallToss.fn = null;
       promptAnchor.key = null;
       window.clearInterval(roomTimer);

@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
+import { BALL_SPAWN } from "./room-defaults";
 import { CHAT_MAX_LEN, IDLE_GAME, IDLE_RPS, type BallState, type GameState, type PlayerState, type RpsChoice, type RpsState, type SosState, type TvState } from "./hall-types";
 
 export interface HallSnapshot {
@@ -79,7 +80,7 @@ export function useHallSocket(me: JoinInfo | null) {
     simulated: true,
     mySocketId: "",
     players: {},
-    ball: { x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null },
+    ball: { x: BALL_SPAWN.x, z: BALL_SPAWN.z, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null },
     tv: { playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: 0 },
     game: IDLE_GAME,
     rps: IDLE_RPS,
@@ -90,7 +91,7 @@ export function useHallSocket(me: JoinInfo | null) {
   const socketRef = useRef<Socket | null>(null);
   const localRef = useRef<PlayerState | null>(null);
   const remoteRef = useRef<Record<string, PlayerState>>({});
-  const ballRef = useRef<BallState>({ x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null });
+  const ballRef = useRef<BallState>({ x: BALL_SPAWN.x, z: BALL_SPAWN.z, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null });
   const tvRef = useRef<TvState>({ playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: 0 });
 
   const pushToast = useCallback((text: string, icon?: string) => {
