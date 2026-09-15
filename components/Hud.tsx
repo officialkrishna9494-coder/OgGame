@@ -270,9 +270,12 @@ function MobileHud(
           {menuOpen ? "✕" : "⋯"}
         </button>
 
-        {/* expanding bubble: react / poke / high-five / tv */}
+        {/* expanding bubble: react / poke / high-five / tv / game / voice.
+            `invisible` (not just opacity-0) when closed — visibility:hidden is
+            never hit-testable, so the hidden menu can't swallow taps meant for
+            the video underneath. */}
         <div
-          className={`pointer-events-auto absolute left-14 top-1/2 w-44 -translate-y-1/2 rounded-[20px] bg-white/95 p-2.5 shadow-2xl ring-1 ring-black/[0.08] backdrop-blur transition-all duration-200 ${menuOpen ? "translate-x-0 opacity-100 scale-100" : "pointer-events-none -translate-x-2 opacity-0 scale-95"}`}
+          className={`absolute left-14 top-1/2 w-44 -translate-y-1/2 rounded-[20px] bg-white/95 p-2.5 shadow-2xl ring-1 ring-black/[0.08] backdrop-blur transition-all duration-200 ${menuOpen ? "visible translate-x-0 scale-100 opacity-100 pointer-events-auto" : "invisible pointer-events-none -translate-x-2 scale-95 opacity-0"}`}
         >
           <p className="px-1 pb-1 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#a08fb5]">react</p>
           <div className="grid grid-cols-4 gap-1">
