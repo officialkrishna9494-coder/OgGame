@@ -55,7 +55,7 @@ export function useHallSocket(me: JoinInfo | null) {
     mySocketId: "",
     players: {},
     ball: { x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null },
-    tv: { playlist: [], index: 0, playing: false, updatedAt: 0 },
+    tv: { playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: 0 },
     game: IDLE_GAME,
     toasts: [],
   });
@@ -64,7 +64,7 @@ export function useHallSocket(me: JoinInfo | null) {
   const localRef = useRef<PlayerState | null>(null);
   const remoteRef = useRef<Record<string, PlayerState>>({});
   const ballRef = useRef<BallState>({ x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null });
-  const tvRef = useRef<TvState>({ playlist: [], index: 0, playing: false, updatedAt: 0 });
+  const tvRef = useRef<TvState>({ playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: 0 });
 
   const pushToast = useCallback((text: string) => {
     setSnapshot((s) => ({ ...s, toasts: [...s.toasts.slice(-2), text] }));
@@ -245,9 +245,12 @@ export function useHallSocket(me: JoinInfo | null) {
     [emit]
   );
 
+  // `seekTo` is converted to positionSec server-side; heartbeats are bare positionSec.
   const tvControl = useCallback(
-    (patch: Partial<TvState>) => {
-      tvRef.current = { ...tvRef.current, ...patch, updatedAt: Date.now() };
+    (patch: Partial<TvState> & { seekTo?: number }) => {
+      const { seekTo: _seek, ...rest } = patch;
+      void _seek;
+      tvRef.current = { ...tvRef.current, ...rest, updatedAt: Date.now() };
       emit("hall:tv", patch);
       setSnapshot((s) => ({ ...s, tv: { ...tvRef.current } }));
     },

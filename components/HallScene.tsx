@@ -570,8 +570,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       g.textAlign = "center";
       g.fillText(tvState.playing ? "▶  NOW PLAYING" : "❚❚  PAUSED", 256, 70);
       g.font = "500 24px system-ui, sans-serif";
-      const title = (cur?.title ?? "pick a video from the TV shelf").slice(0, 40);
-      // wrap
+      const title = (cur?.title ?? "pick a video from the TV shelf").slice(0, 40);      // wrap
       const words = title.split(" ");
       let line = "";
       let y = 130;
@@ -583,6 +582,15 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         } else line += (line ? " " : "") + w;
       }
       if (line) g.fillText(line, 256, y);
+      // watch-party position readout (same math every viewer uses)
+      const pos = Math.max(
+        0,
+        (tvState.positionSec ?? 0) + (tvState.playing ? (Date.now() - tvState.updatedAt) / 1000 : 0)
+      );
+      const mm = `${Math.floor(pos / 60)}:${String(Math.floor(pos % 60)).padStart(2, "0")}`;
+      g.font = "700 22px system-ui, sans-serif";
+      g.fillStyle = "#ffd166";
+      g.fillText(`${tvState.playing ? "▶" : "❚❚"} ${mm} · synced`, 256, 218);
       g.font = "400 20px system-ui, sans-serif";
       g.fillStyle = "rgba(255,255,255,0.75)";
       g.fillText("open the TV panel below to watch together", 256, 248);
@@ -1339,7 +1347,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       origOnNear(id, name);
     };
 
-    // room rebuild polling (admin edits arrive via props)
+    // room rebuild polling (admin edits arrive via props) + tv readout tick
     let lastRoomSig = JSON.stringify([room.frames, room.posters]);
     const roomTimer = window.setInterval(() => {
       const s = JSON.stringify([stateRef.current.room.frames, stateRef.current.room.posters]);
@@ -1347,7 +1355,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         lastRoomSig = s;
         rebuildFrames();
       }
-    }, 800);
+      drawTv();
+    }, 1000);
 
     const onResize = () => {
       const w = mount.clientWidth || 800;

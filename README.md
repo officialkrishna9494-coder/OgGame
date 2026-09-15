@@ -72,7 +72,9 @@ speaking rings, leave. Tokens are minted server-side (`/api/livekit-token`,
 - **Next.js + TypeScript + Three.js** — one environment (`app/page.tsx`).
   All characters, furniture, and textures are procedural (no assets).
 - **Socket.io** (`server.js`) — ephemeral state: presence, movement, emotes,
-  poke / high-five, ball, TV sync. Falls back to demo bots when unreachable.
+  poke / high-five, ball, game, and timestamped TV watch-party sync
+  (position + server anchor, drift-corrected, 800ms anti-fight cooldown).
+  Falls back to demo bots when unreachable.
 - **Firestore** (next) — persistent room config, frames, posters, playlist.
 - **Cloudinary** (next) — actual media files; only URLs live in room data.
 

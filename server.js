@@ -24,7 +24,10 @@ const handle = app.getRequestHandler();
 const players = new Map(); // socketId -> PlayerState
 const meta = new Map(); // socketId -> { name, color }
 let ball = { x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null };
-let tv = { playlist: [], index: 0, playing: false, updatedAt: Date.now() };
+let tv = { playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: Date.now() };
+// watch-party drive cooldown (shared across all sockets — see hall:tv)
+let lastTvDriveAt = 0;
+let lastTvDriveBy = null;
 
 // ─── Star Scramble (mini-game nº 1) — server is the authority ──────────────
 let gameSeq = 1;
@@ -234,8 +237,25 @@ app.prepare().then(() => {
       dirty = true;
     });
 
+    // ─── watch-party TV: timestamped state, anyone can drive ─────────────
+    // Protocol: {playing, positionSec} on play/pause · {index, playing:true,
+    // positionSec:0} on video change · {seekTo} on seek (converted here) ·
+    // {positionSec} heartbeats re-anchor long sessions. Competing drives from
+    // different friends within 800ms lose to the first — no seek fights.
     socket.on("hall:tv", (patch) => {
-      tv = { ...tv, ...patch, updatedAt: Date.now() };
+      const p = { ...(patch || {}) };
+      const competing = p.playing !== undefined || p.index !== undefined || p.seekTo !== undefined;
+      const now = Date.now();
+      if (competing && socket.id !== lastTvDriveBy && now - lastTvDriveAt < 800) return;
+      if (competing) {
+        lastTvDriveAt = now;
+        lastTvDriveBy = socket.id;
+      }
+      if (p.seekTo !== undefined) {
+        p.positionSec = Number(p.seekTo) || 0;
+        delete p.seekTo;
+      }
+      tv = { ...tv, ...p, updatedAt: now };
       dirty = true;
     });
 

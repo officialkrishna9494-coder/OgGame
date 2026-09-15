@@ -71,6 +71,9 @@ export interface TvState {
   playlist: TvVideo[];
   index: number;
   playing: boolean;
+  // watch-party sync: position (sec) at the moment of `updatedAt`.
+  // Viewers compute target = positionSec + (now - updatedAt)/1000 while playing.
+  positionSec: number;
   updatedAt: number;
 }
 
