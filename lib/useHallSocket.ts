@@ -77,7 +77,7 @@ export function useHallSocket(me: JoinInfo | null) {
     let dead = false;
     let botTimer: ReturnType<typeof setInterval> | null = null;
 
-    const socket = io({
+    const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || undefined, {
       path: "/socket.io",
       reconnectionAttempts: 2,
       timeout: 2500,
