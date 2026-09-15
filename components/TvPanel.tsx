@@ -9,16 +9,23 @@ import type { TvState } from "../lib/hall-types";
 interface Props {
   tv: TvState;
   fallbackPlaylist: Array<{ id: string; title: string }>;
+  compact?: boolean;
   onControl: (patch: Partial<TvState>) => void;
   onClose: () => void;
 }
 
-export default function TvPanel({ tv, fallbackPlaylist, onControl, onClose }: Props) {
+export default function TvPanel({ tv, fallbackPlaylist, compact, onControl, onClose }: Props) {
   const playlist = tv.playlist.length ? tv.playlist : fallbackPlaylist;
   const cur = playlist[tv.index % Math.max(1, playlist.length)];
 
   return (
-    <div className="pointer-events-auto absolute bottom-24 left-1/2 z-20 w-[min(94vw,430px)] -translate-x-1/2 overflow-hidden rounded-[24px] bg-white/92 shadow-[0_24px_70px_-18px_rgba(60,40,90,0.45)] ring-1 ring-black/[0.07] backdrop-blur sm:left-auto sm:right-4 sm:translate-x-0">
+    <div
+      className={`pointer-events-auto absolute z-20 overflow-hidden rounded-[24px] bg-white/92 shadow-[0_24px_70px_-18px_rgba(60,40,90,0.45)] ring-1 ring-black/[0.07] backdrop-blur ${
+        compact
+          ? "bottom-2 left-1/2 w-[min(78vw,320px)] -translate-x-1/2"
+          : "bottom-24 left-1/2 w-[min(94vw,430px)] -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0"
+      }`}
+    >
       <div className="flex items-center justify-between bg-[#3d3347] px-4 py-2.5 text-white">
         <p className="text-[13px] font-bold">📺 shared tv {tv.playing ? "· playing" : "· paused"}</p>
         <button onClick={onClose} className="rounded-full bg-white/15 px-2.5 py-0.5 text-[12px] font-bold hover:bg-white/25">
@@ -61,7 +68,8 @@ export default function TvPanel({ tv, fallbackPlaylist, onControl, onClose }: Pr
         </button>
         <p className="ml-1 min-w-0 flex-1 truncate text-[12px] font-semibold text-[#4a3f55]">{cur?.title}</p>
       </div>
-      <div className="max-h-28 overflow-y-auto border-t border-black/[0.06] px-3 py-2">
+      {!compact && (
+        <div className="max-h-28 overflow-y-auto border-t border-black/[0.06] px-3 py-2">
         {playlist.map((v, i) => (
           <button
             key={`${v.id}-${i}`}
@@ -72,7 +80,8 @@ export default function TvPanel({ tv, fallbackPlaylist, onControl, onClose }: Pr
             <span className="truncate">{v.title}</span>
           </button>
         ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

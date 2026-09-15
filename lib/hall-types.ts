@@ -84,8 +84,7 @@ export type HallEvent =
   | { type: "poke"; from: string; to: string }
   | { type: "highfive"; a: string; b: string | null };
 
-export const AVATAR_COLORS = [
-  "#ffb3c7",
+export const AVATAR_COLORS = [  "#ffb3c7",
   "#ffd6a5",
   "#fdffb6",
   "#caffbf",
@@ -98,3 +97,18 @@ export const AVATAR_COLORS = [
 ];
 
 export const EMOTES = ["❤️", "😂", "🎉", "👋", "😮", "🔥", "⭐", "💤"];
+
+// Proximity-driven contextual actions (mobile rail + future game spots).
+export interface ContextState {
+  nearSofa: boolean;
+  nearBall: boolean;
+  holdingBall: boolean;
+  nearTv: boolean;
+}
+
+export const IDLE_CONTEXT: ContextState = {
+  nearSofa: false,
+  nearBall: false,
+  holdingBall: false,
+  nearTv: false,
+};

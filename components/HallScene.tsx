@@ -7,7 +7,8 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { BallState, PlayerState, RoomConfig, TvState } from "../lib/hall-types";
+import type { BallState, ContextState, PlayerState, RoomConfig, TvState } from "../lib/hall-types";
+import { joyState } from "../lib/joy-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
   onMove: (p: PlayerState) => void;
   onBall: (b: BallState) => void;
   onNear: (nearId: string | null, nearName: string | null) => void;
+  onContext: (c: ContextState) => void;
 }
 
 const MY_ID = "me";
@@ -256,16 +258,15 @@ function createAvatar(color: string, name: string): AvatarRig {
 
 export const hallToss: { fn: null | (() => void) } = { fn: null };
 
-export default function HallScene({ myName, myColor, players, ball, room, tv, onMove, onBall, onNear }: Props) {
+export default function HallScene({ myName, myColor, players, ball, room, tv, onMove, onBall, onNear, onContext }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef({ players, ball, room, tv, myName, myColor });
-  const cbRef = useRef({ onMove, onBall, onNear });
-  const joyRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
+  const cbRef = useRef({ onMove, onBall, onNear, onContext });
 
   // keep the long-lived Three.js loop fed with fresh props without re-creating it
   useEffect(() => {
     stateRef.current = { players, ball, room, tv, myName, myColor };
-    cbRef.current = { onMove, onBall, onNear };
+    cbRef.current = { onMove, onBall, onNear, onContext };
   });
 
   useEffect(() => {
@@ -702,8 +703,9 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
     window.addEventListener("keydown", kd);
     window.addEventListener("keyup", ku);
 
-    // joystick (mobile) — rendered by parent overlay? we expose via mount touch
-    const joy = joyRef.current;
+    // joystick (mobile) — the visible Joystick UI writes here too;
+    // canvas drag is the fallback so every touch can steer
+    const joy = joyState;
 
     const resolveCircleAABB = (px: number, pz: number, r: number, c: { x: number; z: number; hx: number; hz: number }) => {
       const cx = Math.max(c.x - c.hx, Math.min(px, c.x + c.hx));
@@ -732,6 +734,7 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
     let nearName: string | null = null;
     const nearIdRef = { current: null as string | null };
     let lastTvSig = "";
+    let lastCtxSig = "";
 
     const clock = new THREE.Clock();
     let elapsed = 0;
@@ -918,6 +921,20 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
         nearId = bestId;
         nearName = bestName;
         cbRef.current.onNear(nearId, nearName);
+      }
+
+      // ── contextual zones (sofa / ball / tv) for the mobile action rail ──
+      // Designed to grow: future mini-games just add another zone + flag.
+      const ctx: ContextState = {
+        nearSofa: Math.abs(me.x) < 3.8 && Math.abs(me.z - 5.5) < 2.1,
+        nearBall: Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z) < 1.7,
+        holdingBall: ballPhys.holderId === MY_ID,
+        nearTv: Math.hypot(me.x, me.z + 9.6) < 3.8,
+      };
+      const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}`;
+      if (ctxSig !== lastCtxSig) {
+        lastCtxSig = ctxSig;
+        cbRef.current.onContext(ctx);
       }
     };
 
