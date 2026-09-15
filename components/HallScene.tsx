@@ -52,6 +52,8 @@ interface Props {
 }
 
 const MY_ID = "me";
+// sun direction (from the hall toward the light) — fixed, so shadows stay put
+const SUN_DIR = new THREE.Vector3(10, 16, 10).normalize();
 // dodgeball throw: flat and quick, so a hit is a skill shot, not a lob
 const DODGE_THROW_SPEED = 11.5;
 const DODGE_THROW_LIFT = 2.6;
@@ -446,23 +448,55 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     scene.background = new THREE.Color("#f6efe6");
     scene.fog = new THREE.Fog("#f6efe6", 48, 100);
 
-    const camera = new THREE.PerspectiveCamera(44, W / H, 0.1, 140);
+    // near plane at 1: the follow camera is never closer than ~5 units to
+    // anything, and depth precision scales with near — 10× finer than 0.1,
+    // which keeps close surfaces from shimmering on phone GPUs
+    const camera = new THREE.PerspectiveCamera(44, W / H, 1, 140);
     let camDist = 20;
     camera.position.set(0, 13, 16);
 
     // ── lights ──
     scene.add(new THREE.HemisphereLight("#fff7ea", "#d9c3a5", 0.95));
+    // ── stable shadows ──
+    // The sun and its shadow box never move: the box is fitted once around
+    // the whole hall (walls included). A shadow camera that follows the player
+    // makes shadow texels slide across every surface — the shimmer on plant
+    // pots and leaves as you walk. Bias + normal bias stop self-shadow speckle
+    // on curved shapes. Desktops get a sharper map; phones keep 2048.
     const sun = new THREE.DirectionalLight("#fff1dc", 1.6);
-    sun.position.set(10, 16, 10);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    // the shadow frustum follows the camera's gaze (see the render loop), so a
-    // hall twice the size keeps the same crisp shadows
-    sun.shadow.camera.left = -19;
-    sun.shadow.camera.right = 19;
-    sun.shadow.camera.top = 19;
-    sun.shadow.camera.bottom = -19;
-    sun.shadow.camera.far = 60;
+    const hallCenter = new THREE.Vector3((HALL.xMin + HALL.xMax) / 2, 0, (HALL.zMin + HALL.zMax) / 2);
+    sun.position.copy(hallCenter).addScaledVector(SUN_DIR, 40);
+    sun.target.position.copy(hallCenter);
+    const shadowRes = window.matchMedia("(pointer: coarse)").matches ? 2048 : 4096;
+    sun.shadow.mapSize.set(shadowRes, shadowRes);
+    {
+      const cam = sun.shadow.camera;
+      cam.position.copy(sun.position);
+      cam.lookAt(hallCenter);
+      cam.updateMatrixWorld();
+      const inv = cam.matrixWorldInverse;
+      const p = new THREE.Vector3();
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const x of [HALL.xMin - 1, HALL.xMax + 1])
+        for (const y of [0, HALL.wallHeight])
+          for (const z of [HALL.zMin - 1, HALL.zMax + 1]) {
+            p.set(x, y, z).applyMatrix4(inv);
+            minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+            minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+            minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+          }
+      cam.left = minX;
+      cam.right = maxX;
+      cam.bottom = minY;
+      cam.top = maxY;
+      cam.near = Math.max(0.5, -maxZ - 2);
+      cam.far = -minZ + 2;
+      cam.updateProjectionMatrix();
+      const texel = (maxX - minX) / shadowRes;
+      sun.shadow.bias = -0.0004;
+      sun.shadow.normalBias = texel * 1.5;
+    }
     scene.add(sun, sun.target);
     const tvGlow = new THREE.PointLight("#a0c4ff", 8, 13, 2);
     tvGlow.position.set(TV.x, 3.2, TV.standZ + 1.8);
@@ -656,7 +690,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       new THREE.MeshStandardMaterial({ color: "#2d6a4f", roughness: 0.9 })
     );
     felt.rotation.x = -Math.PI / 2;
-    felt.position.y = 0.855;
+    felt.position.y = 0.865; // 1.5 cm above the tabletop, never sharing its plane
     felt.receiveShadow = true;
     const rpsLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 0.72, 12), woodDark);
     rpsLeg.position.y = 0.37;
@@ -1746,9 +1780,6 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       lookSm.y += (1.0 - lookSm.y) * Math.min(1, dt * 4);
       lookSm.z += (tz - 4 - lookSm.z) * Math.min(1, dt * 4);
       camera.lookAt(lookSm);
-      sun.position.set(lookSm.x + 10, 16, lookSm.z + 10);
-      sun.target.position.set(lookSm.x, 0, lookSm.z);
-      sun.target.updateMatrixWorld();
 
       // ── in-world prompt: project the current action's anchor to screen ──
       const pk = actionKey(lastCtx, {

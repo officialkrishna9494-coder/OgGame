@@ -151,9 +151,10 @@ export function courtBumpers(): Array<Extract<Prop, { shape: "box" }>> {
       out.push({ shape: "box", x: (a + b) / 2, z, hx: (b - a) / 2, hz: t, y1: bumperH });
     }
   }
-  // short sides, solid
+  // short sides, solid — they butt into the long sides (which own the
+  // corners), so no two bumpers overlap with a shared top
   for (const x of [xMin, xMax]) {
-    out.push({ shape: "box", x, z: (zMin + zMax) / 2, hx: t, hz: (zMax - zMin) / 2, y1: bumperH });
+    out.push({ shape: "box", x, z: (zMin + zMax) / 2, hx: t, hz: (zMax - zMin) / 2 - t, y1: bumperH });
   }
   return out;
 }

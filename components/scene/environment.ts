@@ -78,18 +78,30 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     const wood = mat("#c9a876", 0.75);
     const wainscot = mat("#f0dfc6", 0.9);
     const H = HALL.wallHeight;
-    // back wall
-    shell.add(mesh(new THREE.BoxGeometry(W + 0.8, H, 0.4), wallMat, CX + 0.2, H / 2, BACK_WALL_Z - 0.2));
-    shell.add(mesh(new THREE.BoxGeometry(W, 1.1, 0.06), wainscot, CX, 0.55, BACK_WALL_Z + 0.03));
-    shell.add(mesh(new THREE.BoxGeometry(W, 0.08, 0.1), trim, CX, 1.12, BACK_WALL_Z + 0.05));
-    shell.add(mesh(new THREE.BoxGeometry(W, 0.18, 0.09), wood, CX, 0.09, BACK_WALL_Z + 0.045));
-    shell.add(mesh(new THREE.BoxGeometry(W + 0.4, 0.24, 0.24), trim, CX + 0.2, H - 0.12, BACK_WALL_Z + 0.12));
-    // right wall
-    shell.add(mesh(new THREE.BoxGeometry(0.4, H, D + 0.4), sideWallMat, RIGHT_WALL_X + 0.2, H / 2, CZ - 0.2));
-    shell.add(mesh(new THREE.BoxGeometry(0.06, 1.1, D), wainscot, RIGHT_WALL_X - 0.03, 0.55, CZ));
-    shell.add(mesh(new THREE.BoxGeometry(0.1, 0.08, D), trim, RIGHT_WALL_X - 0.05, 1.12, CZ));
-    shell.add(mesh(new THREE.BoxGeometry(0.09, 0.18, D), wood, RIGHT_WALL_X - 0.045, 0.09, CZ));
-    shell.add(mesh(new THREE.BoxGeometry(0.24, 0.24, D + 0.4), trim, RIGHT_WALL_X - 0.12, H - 0.12, CZ - 0.2));
+    // A box from its extents — walls and trims meet in BUTT joints (one piece
+    // stops where the other's face begins) and their open-edge ends are
+    // staggered by a centimetre or two, so no two same-facing faces ever share
+    // a plane at the corner or the open edges (that's what shimmers).
+    const span = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, m: THREE.Material) =>
+      mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), m, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    const B = BACK_WALL_Z;
+    const R = RIGHT_WALL_X;
+    const L = HALL.xMin;
+    const F = HALL.zMax;
+    // walls: the back wall stops at the right wall's inner face
+    shell.add(span(L - 0.2, R, 0, H, B - 0.4, B, wallMat));
+    shell.add(span(R, R + 0.4, 0, H, B - 0.4, F, sideWallMat));
+    // back-wall trims run to the corner; right-wall trims start at their faces
+    const trims: Array<{ depth: number; y0: number; y1: number; overhang: number; m: THREE.Material }> = [
+      { depth: 0.06, y0: 0, y1: 1.1, overhang: 0, m: wainscot },
+      { depth: 0.1, y0: 1.08, y1: 1.16, overhang: 0.02, m: trim },
+      { depth: 0.09, y0: 0, y1: 0.18, overhang: 0.01, m: wood },
+      { depth: 0.24, y0: H - 0.24, y1: H, overhang: 0.03, m: trim },
+    ];
+    for (const t of trims) {
+      shell.add(span(L - t.overhang, R, t.y0, t.y1, B, B + t.depth, t.m));
+      shell.add(span(R - t.depth, R, t.y0, t.y1, B + t.depth, F + t.overhang, t.m));
+    }
     // wainscot battens every 1.5 m
     const batten = new THREE.BoxGeometry(0.06, 0.9, 0.03);
     for (let x = HALL.xMin + 0.75; x < HALL.xMax; x += 1.5) shell.add(mesh(batten, trim, x, 0.56, BACK_WALL_Z + 0.07));
@@ -121,7 +133,7 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     g.add(cloudPlane);
     const bar = mat("#ffffff", 0.6);
     g.add(mesh(new THREE.BoxGeometry(0.08, 2.3, 0.05), bar, win.x, win.y, z + 0.19));
-    g.add(mesh(new THREE.BoxGeometry(3.3, 0.08, 0.05), bar, win.x, win.y, z + 0.19));
+    g.add(mesh(new THREE.BoxGeometry(3.3, 0.08, 0.05), bar, win.x, win.y, z + 0.195));
     g.add(mesh(roundedBox(4.0, 0.12, 0.4, 0.04), mat("#fffaf2", 0.7), win.x, win.y - 1.4, z + 0.2));
     // soft curtains, gathered at the sides
     for (const side of [-1, 1]) {
@@ -225,17 +237,17 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
       tick.rotation.z = -(i / 12) * Math.PI * 2;
       clock.add(tick);
     }
-    const hand = (len: number, w: number, color: string) => {
+    const hand = (len: number, w: number, color: string, layer: number) => {
       const pivot = new THREE.Group();
-      pivot.position.z = 0.06;
+      pivot.position.z = 0.055 + layer * 0.012;
       const bar = mesh(new THREE.BoxGeometry(w, len, 0.015), mat(color, 0.5), 0, len / 2 - 0.05, 0);
       pivot.add(bar);
       clock.add(pivot);
       return pivot;
     };
-    const hourH = hand(0.32, 0.05, "#3d3347");
-    const minH = hand(0.46, 0.035, "#3d3347");
-    const secH = hand(0.5, 0.012, "#ff8fab");
+    const hourH = hand(0.32, 0.05, "#3d3347", 0);
+    const minH = hand(0.46, 0.035, "#3d3347", 1);
+    const secH = hand(0.5, 0.012, "#ff8fab", 2);
     clock.add(mesh(cylinder(0.04, 0.04, 0.03, 12), mat("#3d3347"), 0, 0, 0.07).rotateX(Math.PI / 2));
     root.add(clock);
     ticks.push(() => {
@@ -265,7 +277,7 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     const sofaMat = mat("#a0c4ff", 0.85);
     const sofaDark = mat("#8ab0f5", 0.85);
     sofa.add(mesh(roundedBox(5.6, 0.7, 1.4, 0.14), sofaMat, 0, 0.55, 0, true));
-    sofa.add(mesh(roundedBox(5.6, 1.05, 0.42, 0.16), sofaMat, 0, 1.18, 0.62, true));
+    sofa.add(mesh(roundedBox(5.56, 1.05, 0.42, 0.16), sofaMat, 0, 1.18, 0.62, true));
     for (const sx of [-2.7, 2.7]) sofa.add(mesh(new THREE.CapsuleGeometry(0.36, 0.9, 6, 14), sofaDark, sx, 0.85, 0, true));
     for (const sx of [-1.75, 0, 1.75]) sofa.add(mesh(roundedBox(1.66, 0.3, 1.1, 0.13), mat("#c3d5fd", 0.95), sx, 1.02, -0.06, true));
     for (const sx of [-1.75, 0, 1.75]) {
@@ -477,7 +489,8 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     const stone = stoneTexture();
     disposables.push(stone);
     const stoneMat = new THREE.MeshStandardMaterial({ map: stone, roughness: 0.95 });
-    nook.add(mesh(roundedBox(0.7, HALL.wallHeight, 3.6, 0.06), stoneMat, RIGHT_WALL_X - 0.35, HALL.wallHeight / 2, fz, true));
+    const chimneyH = HALL.wallHeight - 0.24; // stops under the crown molding
+    nook.add(mesh(roundedBox(0.7, chimneyH, 3.6, 0.06), stoneMat, RIGHT_WALL_X - 0.35, chimneyH / 2, fz, true));
     nook.add(mesh(new THREE.BoxGeometry(0.06, 1.3, 1.9), mat("#1d1412", 1), RIGHT_WALL_X - 0.71, 0.95, fz));
     nook.add(mesh(roundedBox(0.2, 0.22, 2.3, 0.05), mat("#9c8c7e", 0.9), RIGHT_WALL_X - 0.78, 1.72, fz));
     nook.add(mesh(roundedBox(0.9, 0.24, 4.2, 0.06), mat("#9c8c7e", 0.9), RIGHT_WALL_X - 1.05, 0.12, fz, true));
@@ -814,7 +827,7 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     }
     for (const side of [-1, 1]) {
       garden.add(mesh(new THREE.BoxGeometry(0.06, 0.5, 0.7), mat("#3d3347", 0.5, { metalness: 0.3 }), b.x + side * 1.1, 0.25, b.z));
-      garden.add(mesh(new THREE.BoxGeometry(0.06, 0.55, 0.06), mat("#3d3347", 0.5, { metalness: 0.3 }), b.x + side * 1.1, 0.72, b.z + 0.36));
+      garden.add(mesh(new THREE.BoxGeometry(0.045, 0.55, 0.045), mat("#3d3347", 0.5, { metalness: 0.3 }), b.x + side * 1.1, 0.72, b.z + 0.36));
     }
     // stepping stones from the garden toward the court
     for (let i = 0; i < 6; i++) {

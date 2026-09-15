@@ -45,6 +45,15 @@ export function cylinder(rt: number, rb: number, h: number, seg = 20) {
   return cachedGeo(`cy|${rt}|${rb}|${h}|${seg}`, () => new THREE.CylinderGeometry(rt, rb, h, seg));
 }
 
+export function torus(r: number, tube: number, seg = 24) {
+  return cachedGeo(`to|${r}|${tube}|${seg}`, () => new THREE.TorusGeometry(r, tube, 10, seg));
+}
+
+// Z-FIGHTING RULE for everything built with this kit: two surfaces that face
+// the same way must never share a plane. Stack parts with at least 1 cm of
+// daylight (or tuck one fully inside the other) — otherwise the GPU can't
+// decide which is in front and the overlap shimmers as the camera moves.
+
 export function mesh(geo: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0, shadow = false) {
   const m = new THREE.Mesh(geo, material);
   m.position.set(x, y, z);
@@ -80,9 +89,14 @@ export function plant(x: number, z: number, scale: number, variant: number): { g
   const g = new THREE.Group();
   const pot = mat(POT_COLORS[variant % POT_COLORS.length], 0.75);
   const leaf = mat(LEAF_COLORS[variant % LEAF_COLORS.length], 0.8);
+  // pot body (top cap at 0.60) · soil sitting 3 cm proud of it (top 0.63) ·
+  // a rolled rim hugging the lip — no two upward faces share a height, so the
+  // top of the pot can't flicker between soil and clay as the camera moves
   g.add(mesh(cylinder(0.42, 0.32, 0.6, 18), pot, 0, 0.3, 0, true));
-  g.add(mesh(cylinder(0.46, 0.46, 0.08, 18), pot, 0, 0.6, 0));
-  g.add(mesh(cylinder(0.38, 0.38, 0.04, 18), mat("#6b4f3a", 1), 0, 0.62, 0));
+  g.add(mesh(cylinder(0.4, 0.4, 0.03, 18), mat("#6b4f3a", 1), 0, 0.615, 0));
+  const rim = mesh(torus(0.42, 0.045, 24), pot, 0, 0.6, 0);
+  rim.rotation.x = Math.PI / 2;
+  g.add(rim);
   const foliage = new THREE.Group();
   foliage.position.y = 0.6;
   if (variant % 3 === 0) {
