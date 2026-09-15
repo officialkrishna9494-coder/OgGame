@@ -77,8 +77,84 @@ function endGame(io) {
 }
 
 function snapshot() {
-  return { players: Object.fromEntries(players), ball, tv, game };
+  return { players: Object.fromEntries(players), ball, tv, game, rps };
 }
+
+// ─── Rock-Paper-Scissors arena — server referees best-of-5 (first to 3) ────
+const RPS_WIN = 3;
+const RPS_ROUND_MS = 20_000;
+const RPS_REVEAL_MS = 3_500;
+const rpsChoices = ["rock", "paper", "scissors"];
+let rps = {
+  status: "idle",
+  seats: { a: null, b: null },
+  names: { a: "", b: "" },
+  scores: { a: 0, b: 0 },
+  round: 1,
+  picks: { a: null, b: null },
+  deadline: 0,
+  revealUntil: 0,
+  lastReveal: null,
+  winner: null,
+  endedAt: 0,
+};
+
+function rpsReset() {
+  rps = {
+    status: "idle",
+    seats: { a: null, b: null },
+    names: { a: "", b: "" },
+    scores: { a: 0, b: 0 },
+    round: 1,
+    picks: { a: null, b: null },
+    deadline: 0,
+    revealUntil: 0,
+    lastReveal: null,
+    winner: null,
+    endedAt: 0,
+  };
+}
+
+function rpsBeats(a, b) {
+  return (
+    (a === "rock" && b === "scissors") ||
+    (a === "scissors" && b === "paper") ||
+    (a === "paper" && b === "rock")
+  );
+}
+
+function rpsResolve(io, timeout) {
+  // timeouts auto-pick at random so a stalled match can never wedge the table
+  if (!rps.picks.a) {
+    rps.picks.a = rpsChoices[Math.floor(Math.random() * 3)];
+    timeout = true;
+  }
+  if (!rps.picks.b) {
+    rps.picks.b = rpsChoices[Math.floor(Math.random() * 3)];
+    timeout = true;
+  }
+  const { a, b } = rps.picks;
+  const result = a === b ? "draw" : rpsBeats(a, b) ? "a" : "b";
+  if (result === "a") rps.scores.a++;
+  else if (result === "b") rps.scores.b++;
+  rps.lastReveal = { round: rps.round, a, b, result, at: Date.now(), timeout: !!timeout };
+  if (rps.scores.a >= RPS_WIN || rps.scores.b >= RPS_WIN) {
+    rps.status = "ended";
+    rps.winner = rps.scores.a > rps.scores.b ? rps.names.a : rps.names.b;
+    rps.endedAt = Date.now();
+    io.to("hall").emit(
+      "hall:toast",
+      `🏆 ${rps.winner} takes the table ${rps.scores.a}–${rps.scores.b}!`
+    );
+  } else {
+    rps.status = "revealing";
+    rps.revealUntil = Date.now() + RPS_REVEAL_MS;
+  }
+  dirty = true;
+}
+
+// Single-hall relay flag (module scope so game helpers can raise it)
+let dirty = false;
 
 function broadcast(io) {
   io.to("hall").emit("hall:state", snapshot());
@@ -97,7 +173,6 @@ app.prepare().then(() => {
   });
 
   // gentle 12Hz relay so 5–10 friends stay smooth without spam
-  let dirty = false;
   setInterval(() => {
     if (dirty) {
       dirty = false;
@@ -105,13 +180,27 @@ app.prepare().then(() => {
     }
   }, 84);
 
-  // game clock: end rounds + retire result screens
+  // game clock: end rounds + retire result screens (+ RPS referee ticks)
   setInterval(() => {
     if (game.status === "playing" && Date.now() > game.endsAt) {
       endGame(io);
       dirty = true;
     } else if (game.status === "ended" && Date.now() - game.endedAt > 9000) {
       game = { status: "idle", endsAt: 0, endedAt: 0, stars: [], scores: {}, lastCollect: null, winner: null };
+      dirty = true;
+    }
+    // RPS: pick timeouts auto-fill at random, reveals advance, tables reset
+    if (rps.status === "picking" && Date.now() > rps.deadline) {
+      rpsResolve(io, true);
+      dirty = true;
+    } else if (rps.status === "revealing" && Date.now() > rps.revealUntil) {
+      rps.round++;
+      rps.picks = { a: null, b: null };
+      rps.deadline = Date.now() + RPS_ROUND_MS;
+      rps.status = "picking";
+      dirty = true;
+    } else if (rps.status === "ended" && Date.now() - rps.endedAt > 8000) {
+      rpsReset();
       dirty = true;
     }
   }, 500);
@@ -301,6 +390,71 @@ app.prepare().then(() => {
       dirty = true;
     });
 
+    // ─── RPS arena ──────────────────────────────────────────────────────────
+    socket.on("rps:challenge", () => {
+      const m = meta.get(socket.id);
+      const name = m?.name ?? "Friend";
+      if (rps.status === "idle") {
+        rps.seats = { a: socket.id, b: null };
+        rps.names = { a: name, b: "" };
+        rps.status = "waiting";
+        io.to("hall").emit("hall:toast", `✊ ${name} wants a duel — stand by the table to accept!`);
+        dirty = true;
+      } else if (
+        rps.status === "waiting" &&
+        rps.seats.a !== socket.id &&
+        !rps.seats.b
+      ) {
+        rps.seats.b = socket.id;
+        rps.names.b = name;
+        rps.scores = { a: 0, b: 0 };
+        rps.round = 1;
+        rps.picks = { a: null, b: null };
+        rps.lastReveal = null;
+        rps.winner = null;
+        rps.deadline = Date.now() + RPS_ROUND_MS;
+        rps.status = "picking";
+        io.to("hall").emit("hall:toast", `✊ ${rps.names.a} vs ${name} — best of 5, throw your signs!`);
+        dirty = true;
+      }
+    });
+
+    socket.on("rps:pick", ({ choice } = {}) => {
+      if (rps.status !== "picking") return;
+      if (choice !== "rock" && choice !== "paper" && choice !== "scissors") return;
+      const side = rps.seats.a === socket.id ? "a" : rps.seats.b === socket.id ? "b" : null;
+      if (!side) return;
+      rps.picks[side] = choice;
+      dirty = true;
+      if (rps.picks.a && rps.picks.b) rpsResolve(io, false);
+    });
+
+    socket.on("rps:leave", () => {
+      if (rps.status === "waiting" && rps.seats.a === socket.id) {
+        rpsReset();
+        dirty = true;
+      } else if (
+        (rps.status === "picking" || rps.status === "revealing") &&
+        (rps.seats.a === socket.id || rps.seats.b === socket.id)
+      ) {
+        // forfeit: the friend still standing takes the table
+        const other = rps.seats.a === socket.id ? "b" : "a";
+        const played = rps.scores.a + rps.scores.b > 0;
+        const winnerName = other === "a" ? rps.names.a : rps.names.b;
+        const leaver = meta.get(socket.id)?.name ?? "Someone";
+        if (played && winnerName) {
+          rps.status = "ended";
+          rps.winner = winnerName;
+          rps.endedAt = Date.now();
+          io.to("hall").emit("hall:toast", `🏆 ${winnerName} takes it — ${leaver} walked away!`);
+        } else {
+          rpsReset();
+          io.to("hall").emit("hall:toast", `✊ the duel fizzled — table's open!`);
+        }
+        dirty = true;
+      }
+    });
+
     socket.on("hall:room", (room) => {
       socket.to("hall").emit("hall:room", room);
     });
@@ -310,6 +464,24 @@ app.prepare().then(() => {
       players.delete(socket.id);
       meta.delete(socket.id);
       if (ball.holderId === socket.id) ball.holderId = null;
+      // RPS: a vanishing duelist forfeits (or voids an unstarted table)
+      if (rps.seats.a === socket.id || rps.seats.b === socket.id) {
+        if (rps.status === "waiting") {
+          rpsReset();
+        } else if (rps.status === "picking" || rps.status === "revealing") {
+          const other = rps.seats.a === socket.id ? "b" : "a";
+          const played = rps.scores.a + rps.scores.b > 0;
+          const winnerName = other === "a" ? rps.names.a : rps.names.b;
+          if (played && winnerName) {
+            rps.status = "ended";
+            rps.winner = winnerName;
+            rps.endedAt = Date.now();
+            io.to("hall").emit("hall:toast", `🏆 ${winnerName} takes it — rival disconnected!`);
+          } else {
+            rpsReset();
+          }
+        }
+      }
       if (m) socket.to("hall").emit("hall:toast", `${m.name} drifted off 🌙`);
       dirty = true;
     });

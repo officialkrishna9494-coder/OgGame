@@ -120,6 +120,7 @@ export interface ContextState {
   holdingBall: boolean;
   nearTv: boolean;
   nearGame: boolean;
+  nearRps: boolean;
 }
 
 export const IDLE_CONTEXT: ContextState = {
@@ -128,6 +129,7 @@ export const IDLE_CONTEXT: ContextState = {
   holdingBall: false,
   nearTv: false,
   nearGame: false,
+  nearRps: false,
 };
 
 // ─── Star Scramble (mini-game nº 1 — intentionally tiny) ────────────────────
@@ -156,3 +158,66 @@ export const IDLE_GAME: GameState = {
 
 export const GAME_DURATION_MS = 60_000;
 export const STAR_COUNT = 12;
+
+// ─── Rock-Paper-Scissors arena (mini-game nº 2) ─────────────────────────────
+// Server referees a best-of-5 (first to 3) between two seated players.
+// Everyone else spectates the scoreboard + toasts.
+export type RpsChoice = "rock" | "paper" | "scissors";
+
+export const RPS_CHOICES: RpsChoice[] = ["rock", "paper", "scissors"];
+
+export const RPS_EMOJI: Record<RpsChoice, string> = {
+  rock: "✊",
+  paper: "✋",
+  scissors: "✌️",
+};
+
+export function rpsBeats(a: RpsChoice, b: RpsChoice): boolean {
+  return (
+    (a === "rock" && b === "scissors") ||
+    (a === "scissors" && b === "paper") ||
+    (a === "paper" && b === "rock")
+  );
+}
+
+export interface RpsState {
+  status: "idle" | "waiting" | "picking" | "revealing" | "ended";
+  seats: { a: string | null; b: string | null }; // socket ids
+  names: { a: string; b: string };
+  scores: { a: number; b: number };
+  round: number;
+  picks: { a: RpsChoice | null; b: RpsChoice | null };
+  deadline: number;
+  revealUntil: number;
+  lastReveal: {
+    round: number;
+    a: RpsChoice;
+    b: RpsChoice;
+    result: "a" | "b" | "draw";
+    at: number;
+    timeout: boolean;
+  } | null;
+  winner: string | null;
+  endedAt: number;
+}
+
+export const IDLE_RPS: RpsState = {
+  status: "idle",
+  seats: { a: null, b: null },
+  names: { a: "", b: "" },
+  scores: { a: 0, b: 0 },
+  round: 1,
+  picks: { a: null, b: null },
+  deadline: 0,
+  revealUntil: 0,
+  lastReveal: null,
+  winner: null,
+  endedAt: 0,
+};
+
+export const RPS_WIN_SCORE = 3;
+export const RPS_ROUND_MS = 20_000;
+export const RPS_REVEAL_MS = 3_500;
+
+// RPS table spot — back-left, by the window end
+export const RPS_TABLE = { x: -10, z: -6.5 };

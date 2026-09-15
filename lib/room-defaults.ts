@@ -99,10 +99,11 @@ export const COLLIDERS = [
   { x: 11.5, z: -9.5, hx: 0.9, hz: 0.9 }, // plant
   { x: -11, z: -9, hx: 0.9, hz: 0.9 }, // plant
   { x: 11.5, z: 3.5, hx: 0.6, hz: 0.6 }, // lamp
-  { x: -12, z: -6, hx: 0.6, hz: 0.6 }, // lamp
+  { x: -13.8, z: 0.5, hx: 0.6, hz: 0.6 }, // lamp
   { x: -4.2, z: 1.2, hx: 0.8, hz: 0.8 }, // floor cushion
   { x: 4.2, z: 1.6, hx: 0.8, hz: 0.8 }, // floor cushion
-  { x: 7.5, z: 4.5, hx: 0.8, hz: 0.8 }, // floor cushion
+  { x: -10, z: -6.5, hx: 1.3, hz: 1.0 }, // RPS table
+  { x: -12.9, z: -6.5, hx: 1.3, hz: 0.35 }, // RPS scoreboard
 ];
 
 export const HALL_BOUNDS = { x: 14.6, zMin: -11.4, zMax: 11.2 };

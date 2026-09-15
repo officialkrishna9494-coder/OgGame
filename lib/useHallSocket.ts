@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { IDLE_GAME, type BallState, type GameState, type PlayerState, type TvState } from "./hall-types";
+import { IDLE_GAME, IDLE_RPS, type BallState, type GameState, type PlayerState, type RpsChoice, type RpsState, type TvState } from "./hall-types";
 
 export interface HallSnapshot {
   connected: boolean;
@@ -18,6 +18,7 @@ export interface HallSnapshot {
   ball: BallState;
   tv: TvState;
   game: GameState;
+  rps: RpsState;
   toasts: string[];
 }
 
@@ -57,6 +58,7 @@ export function useHallSocket(me: JoinInfo | null) {
     ball: { x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null },
     tv: { playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: 0 },
     game: IDLE_GAME,
+    rps: IDLE_RPS,
     toasts: [],
   });
 
@@ -118,7 +120,7 @@ export function useHallSocket(me: JoinInfo | null) {
       socket.emit("hall:join", { name: me?.name ?? "Friend", color: me?.color ?? "#ffb3c7" });
     });
     socket.on("connect_error", failToBots);
-    socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState; game?: GameState }) => {
+    socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState; game?: GameState; rps?: RpsState }) => {
       // The server echoes our own player back under our socket.id — drop it so
       // we render exactly ONE self avatar (the local "me" prediction).
       const mine = socket.id;
@@ -129,12 +131,14 @@ export function useHallSocket(me: JoinInfo | null) {
       ballRef.current = ball;
       tvRef.current = state.tv;
       const game = state.game ?? IDLE_GAME;
+      const rps = state.rps ?? IDLE_RPS;
       setSnapshot((s) => ({
         ...s,
         players: { ...others, ...(localRef.current ? { [localRef.current.id]: localRef.current } : {}) },
         ball,
         tv: state.tv,
         game,
+        rps,
       }));
     });
     socket.on("hall:toast", (text: string) => pushToast(text));
@@ -271,6 +275,21 @@ export function useHallSocket(me: JoinInfo | null) {
     emit("hall:hit", {});
   }, [emit]);
 
+  const challengeRps = useCallback(() => {
+    emit("rps:challenge", {});
+  }, [emit]);
+
+  const pickRps = useCallback(
+    (choice: RpsChoice) => {
+      emit("rps:pick", { choice });
+    },
+    [emit]
+  );
+
+  const leaveRps = useCallback(() => {
+    emit("rps:leave", {});
+  }, [emit]);
+
   const collectStar = useCallback(
     (starId: string) => {
       emit("game:collect", { starId });
@@ -291,6 +310,9 @@ export function useHallSocket(me: JoinInfo | null) {
     tvControl,
     startGame,
     sendHit,
+    challengeRps,
+    pickRps,
+    leaveRps,
     collectStar,
     pushToast,
   };

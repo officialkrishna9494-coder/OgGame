@@ -52,6 +52,14 @@ score. Server validates pickups and keeps the leaderboard; winners get a
 toast + fanfare. Intentionally tiny — the next games plug into the same
 `ContextState` zone pattern.
 
+## Mini-game nº 2 — ✊✋✌️ RPS Showdown
+
+A felt table + live scoreboard on the east side. Walk up and hit ACT to
+challenge; a friend accepts from the table (or the panel). Best of 5, first
+to 3 — secret picks, simultaneous reveal with both signs on the big screen,
+timeouts auto-pick at random so the table never wedges, forfeits and
+disconnects handled, everyone spectates scores + toasts.
+
 ## Voice channel (LiveKit Cloud, free tier)
 
 Talk while you wander — whoever joins the hall can hop into voice. Hit 🎙️

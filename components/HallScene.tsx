@@ -7,7 +7,7 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { BallState, ContextState, GameState, PlayerState, RoomConfig, TvState } from "../lib/hall-types";
+import type { BallState, ContextState, GameState, PlayerState, RoomConfig, RpsState, TvState } from "../lib/hall-types";
 import { IDLE_CONTEXT } from "../lib/hall-types";
 import { joyState } from "../lib/joy-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
@@ -21,6 +21,7 @@ interface Props {
   room: RoomConfig;
   tv: TvState;
   game: GameState;
+  rps: RpsState;
   onMove: (p: PlayerState) => void;
   onBall: (b: BallState) => void;
   onNear: (nearId: string | null, nearName: string | null) => void;
@@ -350,14 +351,14 @@ function lerpAngle(a: number, b: number, t: number): number {
 
 export const hallToss: { fn: null | (() => void) } = { fn: null };
 
-export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, onMove, onBall, onNear, onContext, onCollect, onHit }: Props) {
+export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, rps, onMove, onBall, onNear, onContext, onCollect, onHit }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ players, ball, room, tv, game, myName, myColor, mySocketId });
+  const stateRef = useRef({ players, ball, room, tv, game, rps, myName, myColor, mySocketId });
   const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect, onHit });
 
   // keep the long-lived Three.js loop fed with fresh props without re-creating it
   useEffect(() => {
-    stateRef.current = { players, ball, room, tv, game, myName, myColor, mySocketId };
+    stateRef.current = { players, ball, room, tv, game, rps, myName, myColor, mySocketId };
     cbRef.current = { onMove, onBall, onNear, onContext, onCollect, onHit };
   });
 
@@ -398,7 +399,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     lampLight.position.set(11.5, 3.4, 3.5);
     scene.add(lampLight);
     const lampLight2 = new THREE.PointLight("#ffca7a", 10, 16, 2);
-    lampLight2.position.set(-12, 3.2, -6);
+    lampLight2.position.set(-13.8, 3.2, 0.5);
     scene.add(lampLight2);
     const tvGlow = new THREE.PointLight("#a0c4ff", 8, 13, 2);
     tvGlow.position.set(0, 3.4, -9.4);
@@ -714,7 +715,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     lampA.position.set(11.5, 0, 3.5);
     scene.add(lampA);
     const lampB = makeLamp();
-    lampB.position.set(-12, 0, -6);
+    lampB.position.set(-13.8, 0, 0.5);
     scene.add(lampB);
 
     const plantAt = (x: number, z: number) => {
@@ -785,7 +786,167 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     };
     cushionAt(-4.2, 1.2, "#ffc6ff");
     cushionAt(4.2, 1.6, "#9bf6ff");
-    cushionAt(7.5, 4.5, "#caffbf");
+
+    // ── RPS arena (replaces the old green cushion) ──
+    const RPS_POS = { x: -10, z: -6.5 };
+    const woodDark = new THREE.MeshStandardMaterial({ color: "#8a6f55", roughness: 0.7 });
+    const rpsTable = new THREE.Group();
+    const rpsTop = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.15, 1.15, 0.14, 28),
+      new THREE.MeshStandardMaterial({ color: "#fffaf0", roughness: 0.5 })
+    );
+    rpsTop.position.y = 0.78;
+    rpsTop.castShadow = rpsTop.receiveShadow = true;
+    const felt = new THREE.Mesh(
+      new THREE.CircleGeometry(0.95, 28),
+      new THREE.MeshStandardMaterial({ color: "#2d6a4f", roughness: 0.9 })
+    );
+    felt.rotation.x = -Math.PI / 2;
+    felt.position.y = 0.855;
+    felt.receiveShadow = true;
+    const rpsLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 0.72, 12), woodDark);
+    rpsLeg.position.y = 0.37;
+    rpsLeg.castShadow = true;
+    rpsTable.add(rpsTop, felt, rpsLeg);
+    rpsTable.position.set(RPS_POS.x, 0, RPS_POS.z);
+    scene.add(rpsTable);
+    // stools for the duelists
+    const stoolAt = (x: number, z: number, color: string) => {
+      const st = new THREE.Group();
+      const seatm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.42, 0.42, 0.12, 18),
+        new THREE.MeshStandardMaterial({ color, roughness: 0.8 })
+      );
+      seatm.position.y = 0.55;
+      seatm.castShadow = true;
+      const legm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.5, 10), woodDark);
+      legm.position.y = 0.26;
+      st.add(seatm, legm);
+      st.position.set(x, 0, z);
+      scene.add(st);
+    };
+    stoolAt(-11.3, -5.2, "#ff8fab");
+    stoolAt(-8.7, -7.8, "#9bf6ff");
+    // floating ✊✋✌️ decor above the table
+    const rpsDeco: Array<{ sp: THREE.Sprite; phase: number }> = [];
+    ["✊", "✋", "✌️"].forEach((e, i) => {
+      const sp = makeEmoteSprite(e);
+      sp.position.set(RPS_POS.x - 0.8 + i * 0.8, 2.0 + (i % 2) * 0.25, RPS_POS.z);
+      sp.scale.set(0.55, 0.55, 1);
+      scene.add(sp);
+      rpsDeco.push({ sp, phase: i * 2.1 });
+    });
+
+    // scoreboard FACING the room (+z, toward the camera) — live RPS state here.
+    // Wide in x, thin in z, readable face front AND back.
+    const rpsCanvas = document.createElement("canvas");
+    rpsCanvas.width = 512;
+    rpsCanvas.height = 340;
+    const rpsTex = new THREE.CanvasTexture(rpsCanvas);
+    rpsTex.colorSpace = THREE.SRGBColorSpace;
+    const boardGrp = new THREE.Group();
+    const postMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.7, 0.28), woodDark);
+    postMesh.position.y = 0.85;
+    postMesh.castShadow = true;
+    const boardMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2.5, 1.7, 0.16),
+      new THREE.MeshStandardMaterial({ color: "#3d3347", roughness: 0.6 })
+    );
+    boardMesh.position.y = 2.2;
+    boardMesh.castShadow = true;
+    boardGrp.add(postMesh, boardMesh);
+    for (const side of [1, -1]) {
+      const face = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.2, 1.45),
+        new THREE.MeshBasicMaterial({ map: rpsTex })
+      );
+      face.position.set(0, 2.2, side * 0.085);
+      if (side < 0) face.rotation.y = Math.PI;
+      boardGrp.add(face);
+    }
+    boardGrp.position.set(-12.9, 0, -6.5);
+    scene.add(boardGrp);
+
+    const drawRps = () => {
+      const rs = stateRef.current.rps;
+      const g = rpsCanvas.getContext("2d")!;
+      g.fillStyle = "#234034";
+      g.fillRect(0, 0, 512, 340);
+      g.strokeStyle = "#ffb703";
+      g.lineWidth = 6;
+      g.strokeRect(10, 10, 492, 320);
+      g.textAlign = "center";
+      g.fillStyle = "#ffd166";
+      g.font = "800 30px system-ui, sans-serif";
+      g.fillText("✊ ✋ ✌️ SHOWDOWN", 256, 48);
+      const playing = rs.status === "picking" || rs.status === "revealing";
+      const waiting = rs.status === "waiting";
+      const nameA = playing || rs.status === "ended" ? rs.names.a || "—" : "???";
+      const nameB = playing || rs.status === "ended" ? rs.names.b || "—" : "???";
+      g.font = "700 26px system-ui, sans-serif";
+      g.fillStyle = "#ff8fab";
+      g.fillText(nameA.slice(0, 12), 130, 92);
+      g.fillStyle = "#9bf6ff";
+      g.fillText(nameB.slice(0, 12), 382, 92);
+      // score pips (first to 3)
+      const pips = (n: number, x: number) => {
+        for (let i = 0; i < 3; i++) {
+          g.fillStyle = i < n ? "#ffd166" : "rgba(255,255,255,0.22)";
+          g.beginPath();
+          g.arc(x - 28 + i * 28, 118, 11, 0, Math.PI * 2);
+          g.fill();
+        }
+      };
+      pips(rs.scores.a, 130);
+      pips(rs.scores.b, 382);
+      g.fillStyle = "#ffffff";
+      g.font = "800 44px system-ui, sans-serif";
+      g.fillText(`${rs.scores.a} – ${rs.scores.b}`, 256, 122);
+      g.font = "600 22px system-ui, sans-serif";
+      g.fillStyle = "rgba(255,255,255,0.8)";
+      // center stage
+      if (rs.status === "revealing" && rs.lastReveal) {
+        const rv = rs.lastReveal;
+        const em = (c: "rock" | "paper" | "scissors") =>
+          c === "rock" ? "✊" : c === "paper" ? "✋" : "✌️";
+        g.font = "90px serif";
+        g.fillText(`${em(rv.a)}  ${em(rv.b)}`, 256, 225);
+        g.font = "800 30px system-ui, sans-serif";
+        g.fillStyle = "#ffd166";
+        g.fillText(
+          rv.result === "draw" ? "DRAW — REPLAY!" : rv.result === "a" ? `${nameA.slice(0, 12)} TAKES R${rv.round}!` : `${nameB.slice(0, 12)} TAKES R${rv.round}!`,
+          256,
+          272
+        );
+      } else if (rs.status === "ended") {
+        g.font = "90px serif";
+        g.fillText("🏆", 256, 225);
+        g.font = "800 30px system-ui, sans-serif";
+        g.fillStyle = "#ffd166";
+        g.fillText(`${(rs.winner ?? "???").slice(0, 16)} WINS!`, 256, 272);
+      } else if (waiting) {
+        g.font = "600 24px system-ui, sans-serif";
+        g.fillStyle = "#ffffff";
+        g.fillText(`${rs.names.a.slice(0, 14)} wants a duel…`, 256, 210);
+        g.fillStyle = "rgba(255,255,255,0.75)";
+        g.fillText("stand by the table + ACT!", 256, 248);
+      } else if (playing) {
+        const left = Math.max(0, Math.ceil((rs.deadline - Date.now()) / 1000));
+        g.font = "600 26px system-ui, sans-serif";
+        g.fillStyle = "#ffffff";
+        g.fillText(`ROUND ${rs.round} · ${left}s — throw!`, 256, 225);
+      } else {
+        g.font = "600 24px system-ui, sans-serif";
+        g.fillStyle = "rgba(255,255,255,0.85)";
+        g.fillText("table open — stand by + ACT", 256, 210);
+        g.fillText("best of 5 · first to 3 ⭐", 256, 248);
+      }
+      g.font = "600 20px system-ui, sans-serif";
+      g.fillStyle = "rgba(255,255,255,0.7)";
+      if (playing || rs.status === "ended") g.fillText(`ROUND ${rs.round} · FIRST TO 3`, 256, 312);
+      rpsTex.needsUpdate = true;
+    };
+    drawRps();
 
     // ball
     const ballMesh = new THREE.Mesh(
@@ -876,6 +1037,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     let nearName: string | null = null;
     const nearIdRef = { current: null as string | null };
     let lastTvSig = "";
+    let lastRpsSig = "";
     let lastCtxSig = "";
     let lastCtx: ContextState = { ...IDLE_CONTEXT };
     const claimedStars = new Set<string>();
@@ -1154,6 +1316,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         : dxSofa < 3.8 && dzSofa < 2.0;
       const dTv = Math.hypot(me.x, me.z + 9.6);
       const nearTv = lastCtx.nearTv ? dTv < 4.3 : dTv < 3.6;
+      const dRps = Math.hypot(me.x + 10, me.z + 6.5);
+      const nearRps = lastCtx.nearRps ? dRps < 3.4 : dRps < 2.8;
       const dBall = Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z);
       const nearBall = lastCtx.nearBall ? dBall < 2.0 : dBall < 1.5;
       const ctx: ContextState = {
@@ -1162,9 +1326,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         holdingBall: ballPhys.holderId === MY_ID,
         nearTv,
         nearGame,
+        nearRps,
       };
       lastCtx = ctx;
-      const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}${ctx.nearGame ? 1 : 0}`;
+      const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}${ctx.nearGame ? 1 : 0}${ctx.nearRps ? 1 : 0}`;
       if (ctxSig !== lastCtxSig) {
         lastCtxSig = ctxSig;
         cbRef.current.onContext(ctx);
@@ -1362,12 +1527,27 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         }
       }
 
-      // ── tv refresh (title changes) ──
+      // ── tv + scoreboard refresh ──
       const tvSig = `${st.tv.index}-${st.tv.playing}-${st.room.tv.length}`;
       if (tvSig !== lastTvSig) {
         lastTvSig = tvSig;
         drawTv();
       }
+      const rpsSig = [
+        st.rps.status,
+        st.rps.round,
+        st.rps.scores.a,
+        st.rps.scores.b,
+        st.rps.lastReveal?.at ?? 0,
+        st.rps.names.a,
+        st.rps.names.b,
+        st.rps.winner ?? "",
+      ].join("|");
+      if (rpsSig !== lastRpsSig) {
+        lastRpsSig = rpsSig;
+        drawRps();
+      }
+      for (const d of rpsDeco) d.sp.position.y += Math.sin(elapsed * 2 + d.phase) * dt * 0.15;
       tvGlow.intensity = 8 + Math.sin(elapsed * 6) * 1 + (st.tv.playing ? 3 : 0);
 
       // ── camera follow: both the position AND the gaze point are damped,
@@ -1393,7 +1573,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       origOnNear(id, name);
     };
 
-    // room rebuild polling (admin edits arrive via props) + tv readout tick
+    // room rebuild polling (admin edits arrive via props) + tv/scoreboard tick
     let lastRoomSig = JSON.stringify([room.frames, room.posters]);
     const roomTimer = window.setInterval(() => {
       const s = JSON.stringify([stateRef.current.room.frames, stateRef.current.room.posters]);
@@ -1402,6 +1582,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         rebuildFrames();
       }
       drawTv();
+      drawRps();
     }, 1000);
 
     const onResize = () => {

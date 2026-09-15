@@ -26,6 +26,7 @@ interface Props {
   context?: ContextState;
   gameStatus?: string;
   gameOpen?: boolean;
+  rpsStatus?: string;
   voiceStatus?: VoiceStatus;
   voiceOpen?: boolean;
   voiceCount?: number;
@@ -39,12 +40,15 @@ interface Props {
   onToggleTv: () => void;
   onToggleGame: () => void;
   onToggleVoice: () => void;
+  onToggleRps: () => void;
+  onRpsAct: () => void;
   onOpenAddLink: () => void;
 }
 
 // ─── the one universal ACT button ───────────────────────────────────────────
-// Same priority everywhere: toss (holding) → add link (near TV) → play
-// (on the rug, game idle) → sofa sit/stand. Everything else lives in menus.
+// Same priority everywhere: toss (holding) → add link (near TV) → duel
+// (at the RPS table) → play (on the rug, star game idle) → sofa sit/stand.
+// Everything else lives in menus.
 interface PrimaryAction {
   key: string;
   icon: string;
@@ -56,13 +60,21 @@ interface PrimaryAction {
 function primaryAction(
   ctx: ContextState | undefined,
   flags: { sitting: boolean; gameStatus?: string },
-  h: { onToss: () => void; onOpenAddLink: () => void; onToggleGame: () => void; onSofaSit: () => void }
+  h: {
+    onToss: () => void;
+    onOpenAddLink: () => void;
+    onRpsAct: () => void;
+    onToggleGame: () => void;
+    onSofaSit: () => void;
+  }
 ): PrimaryAction | null {
   if (!ctx) return null;
   if (ctx.holdingBall)
     return { key: "toss", icon: "⚽", label: "toss", glow: "#ff6b6b", run: h.onToss };
   if (ctx.nearTv)
     return { key: "addlink", icon: "🔗", label: "add link", glow: "#ff8fab", run: h.onOpenAddLink };
+  if (ctx.nearRps)
+    return { key: "duel", icon: "✊", label: "duel", glow: "#40916c", run: h.onRpsAct };
   if (ctx.nearGame && flags.gameStatus === "idle")
     return { key: "play", icon: "⭐", label: "play", glow: "#ffb703", run: h.onToggleGame };
   if (ctx.nearSofa)
@@ -90,7 +102,7 @@ export default function Hud(p: Props) {
   const primary = primaryAction(
     p.context,
     { sitting: p.sitting, gameStatus: p.gameStatus },
-    { onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
+    { onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onRpsAct: p.onRpsAct, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
   );
 
   return (
@@ -200,6 +212,19 @@ export default function Hud(p: Props) {
             ⭐ {p.gameStatus === "playing" ? "playing!" : "game"}
           </button>
           <button
+            className={btn}
+            onClick={p.onToggleRps}
+            title="rock-paper-scissors arena"
+          >
+            <span className="relative text-base">
+              ✊
+              {(p.rpsStatus === "picking" || p.rpsStatus === "revealing") && (
+                <span className="absolute -right-1 -top-1 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white" />
+              )}
+            </span>{" "}
+            rps
+          </button>
+          <button
             className={`${btn} ${p.voiceOpen ? "!bg-[#8ce8c0] !text-[#234034]" : ""}`}
             onClick={p.onToggleVoice}
             title="voice channel"
@@ -244,7 +269,7 @@ function MobileHud(
   const primary = primaryAction(
     ctx,
     { sitting: p.sitting, gameStatus: p.gameStatus },
-    { onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
+    { onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onRpsAct: p.onRpsAct, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
   );
 
   const showBallHint = ctx && !ctx.holdingBall && ctx.nearBall;
@@ -354,6 +379,9 @@ function MobileHud(
             </button>
             <button className={mini} onClick={() => { p.onToggleGame(); setMenuOpen(false); }}>
               ⭐ {p.gameStatus === "playing" ? "scramble!" : "star game"}
+            </button>
+            <button className={mini} onClick={() => { p.onToggleRps(); setMenuOpen(false); }}>
+              ✊ {p.rpsStatus === "idle" ? "rps duel" : "rps live!"}
             </button>
             <button className={mini} onClick={() => { p.onToggleVoice(); setMenuOpen(false); }}>
               🎙️ {p.voiceStatus === "live" ? `voice · ${p.voiceCount ?? ""}` : "voice chat"}

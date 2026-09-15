@@ -10,6 +10,7 @@ import dynamic from "next/dynamic";
 import AuthGate from "../components/AuthGate";
 import AddLinkPanel from "../components/AddLinkPanel";
 import GamePanel from "../components/GamePanel";
+import RpsPanel from "../components/RpsPanel";
 import Hud from "../components/Hud";
 import RotatePrompt from "../components/RotatePrompt";
 import TvPanel from "../components/TvPanel";
@@ -32,6 +33,7 @@ function HallClient({ me }: { me: Identity }) {
   const [tvOpen, setTvOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [rpsOpen, setRpsOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [nearId, setNearId] = useState<string | null>(null);
   const [nearName, setNearName] = useState<string | null>(null);
@@ -40,7 +42,7 @@ function HallClient({ me }: { me: Identity }) {
   const voice = useVoice(me);
 
   const socket = useHallSocket(me);
-  const { players, ball, tv, game, toasts, simulated, mySocketId } = socket.snapshot;
+  const { players, ball, tv, game, rps, toasts, simulated, mySocketId } = socket.snapshot;
 
   // persist Google profiles to Firestore `users/{uid}` (no-op without config)
   useEffect(() => {
@@ -65,6 +67,21 @@ function HallClient({ me }: { me: Identity }) {
     }
   }, [game]);
 
+  // RPS sounds: pop on every reveal, fanfare on match win
+  const lastRevealAt = useRef(0);
+  const lastRpsStatus = useRef(rps.status);
+  useEffect(() => {
+    if (rps.lastReveal && rps.lastReveal.at > lastRevealAt.current) {
+      lastRevealAt.current = rps.lastReveal.at;
+      popSfx();
+    }
+    if (rps.status !== lastRpsStatus.current) {
+      if (rps.status === "picking") startSfx();
+      if (rps.status === "ended") winSfx();
+      lastRpsStatus.current = rps.status;
+    }
+  }, [rps]);
+
   const tvPlaylist = useMemo(
     () => (tv.playlist.length ? tv.playlist : room.tv),
     [tv.playlist, room.tv]
@@ -81,6 +98,12 @@ function HallClient({ me }: { me: Identity }) {
   const handleCollect = useCallback((starId: string) => socket.collectStar(starId), [socket]);
   const handleHit = useCallback(() => socket.sendHit(), [socket]);
   const handleSofaSit = useCallback(() => socket.sendAction("sit", null, { seatMode: "sofa" }), [socket]);
+  // ACT at the RPS table: idle → throw a challenge + open the panel,
+  // otherwise just open the panel (join / pick / spectate from there).
+  const handleRpsAct = useCallback(() => {
+    if (socket.snapshot.rps.status === "idle") socket.challengeRps();
+    setRpsOpen(true);
+  }, [socket]);
 
   // anyone near the TV can put ONE link on the shared shelf (synced via room)
   const handleAddVideo = useCallback(
@@ -113,6 +136,7 @@ function HallClient({ me }: { me: Identity }) {
         room={room}
         tv={{ ...tv, playlist: tvPlaylist }}
         game={game}
+        rps={rps}
         onMove={handleMove}
         onBall={handleBall}
         onNear={handleNear}
@@ -138,6 +162,7 @@ function HallClient({ me }: { me: Identity }) {
         context={context}
         gameStatus={game.status}
         gameOpen={gameOpen}
+        rpsStatus={rps.status}
         voiceStatus={voice.status}
         voiceOpen={voiceOpen}
         voiceCount={voice.peers.length || undefined}
@@ -151,11 +176,25 @@ function HallClient({ me }: { me: Identity }) {
         onToggleTv={() => setTvOpen((v) => !v)}
         onToggleGame={() => setGameOpen((v) => !v)}
         onToggleVoice={() => setVoiceOpen((v) => !v)}
+        onToggleRps={() => setRpsOpen((v) => !v)}
+        onRpsAct={handleRpsAct}
         onOpenAddLink={() => setLinkOpen(true)}
       />
 
       {gameOpen && (
         <GamePanel game={game} compact={mobile} onStart={socket.startGame} onClose={() => setGameOpen(false)} />
+      )}
+
+      {rpsOpen && (
+        <RpsPanel
+          rps={rps}
+          mySocketId={mySocketId}
+          compact={mobile}
+          onChallenge={socket.challengeRps}
+          onPick={socket.pickRps}
+          onLeave={socket.leaveRps}
+          onClose={() => setRpsOpen(false)}
+        />
       )}
 
       {voiceOpen && <VoicePanel voice={voice} compact={mobile} onClose={() => setVoiceOpen(false)} />}
