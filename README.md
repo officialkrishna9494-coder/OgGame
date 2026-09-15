@@ -46,12 +46,26 @@ them and `/admin` switches to cloud mode automatically:
   mini-game state.
 
 ## Mini-game nº 1 — ⭐ Star Scramble
-
 Open the ⭐ panel (dock on desktop, ⋯ menu on mobile, or walk onto the rug).
 Anyone can start: 12 golden stars spawn for 60 seconds, walk over them to
 score. Server validates pickups and keeps the leaderboard; winners get a
 toast + fanfare. Intentionally tiny — the next games plug into the same
 `ContextState` zone pattern.
+
+## Voice channel (LiveKit Cloud, free tier)
+
+Talk while you wander — whoever joins the hall can hop into voice. Hit 🎙️
+in the dock (desktop) or the ⋯ menu (mobile): join, mute, live roster with
+speaking rings, leave. Tokens are minted server-side (`/api/livekit-token`,
+2h TTL) so your API secret never reaches browsers.
+
+**Get your keys (2 minutes, free):**
+1. Sign up at **cloud.livekit.io** → create a project (call it `cozy-hall`).
+2. Project page → copy the **WebSocket URL** (`wss://…livekit.cloud`) →
+   `NEXT_PUBLIC_LIVEKIT_URL`.
+3. **Settings → Keys → Create key** → copy **API Key** → `LIVEKIT_API_KEY`
+   and **API Secret** → `LIVEKIT_API_SECRET` (server-only, no `NEXT_PUBLIC_`).
+4. Add all three to `.env.local` (restart dev) and Vercel env vars (redeploy).
 
 ## Architecture
 

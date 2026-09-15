@@ -12,6 +12,7 @@ import { loadRoom, saveRoom } from "../../lib/room-store";
 import { AUTH_MODE } from "../../lib/auth";
 import { dbConfigured } from "../../lib/db";
 import { cloudinaryConfigured, uploadImage } from "../../lib/media";
+import { voiceConfigured } from "../../lib/voice-config";
 import type { RoomConfig } from "../../lib/hall-types";
 
 const PASSCODE = "cozy123";
@@ -101,6 +102,11 @@ export default function AdminPage() {
             ok={cloudinaryConfigured()}
             label={cloudinaryConfigured() ? "Cloudinary · ready" : "Cloudinary · off"}
             hint={cloudinaryConfigured() ? "uploads enabled below" : "add cloud name + preset"}
+          />
+          <StatusPill
+            ok={voiceConfigured()}
+            label={voiceConfigured() ? "Voice · ready" : "Voice · off"}
+            hint={voiceConfigured() ? "LiveKit channel live in the hall" : "add LiveKit URL + keys"}
           />
         </section>
 

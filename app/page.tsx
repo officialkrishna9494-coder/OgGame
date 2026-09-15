@@ -12,10 +12,12 @@ import GamePanel from "../components/GamePanel";
 import Hud from "../components/Hud";
 import RotatePrompt from "../components/RotatePrompt";
 import TvPanel from "../components/TvPanel";
+import VoicePanel from "../components/VoicePanel";
 import { hallToss } from "../components/HallScene";
 import { useRoom } from "../lib/room-store";
 import { useHallSocket } from "../lib/useHallSocket";
 import { useMobileLandscape } from "../lib/useMobileLandscape";
+import { useVoice } from "../lib/useVoice";
 import { dbConfigured } from "../lib/db";
 import { popSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
@@ -27,10 +29,12 @@ function HallClient({ me }: { me: Identity }) {
   const { room } = useRoom();
   const [tvOpen, setTvOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [nearId, setNearId] = useState<string | null>(null);
   const [nearName, setNearName] = useState<string | null>(null);
   const [context, setContext] = useState<ContextState>(IDLE_CONTEXT);
   const mobile = useMobileLandscape();
+  const voice = useVoice(me);
 
   const socket = useHallSocket(me);
   const { players, ball, tv, game, toasts, simulated, mySocketId } = socket.snapshot;
@@ -112,6 +116,9 @@ function HallClient({ me }: { me: Identity }) {
         context={context}
         gameStatus={game.status}
         gameOpen={gameOpen}
+        voiceStatus={voice.status}
+        voiceOpen={voiceOpen}
+        voiceCount={voice.peers.length || undefined}
         onSignOut={me.signOut}
         onEmote={socket.sendEmote}
         onPoke={() => socket.sendAction("poke", nearId)}
@@ -120,11 +127,14 @@ function HallClient({ me }: { me: Identity }) {
         onToss={() => hallToss.fn?.()}
         onToggleTv={() => setTvOpen((v) => !v)}
         onToggleGame={() => setGameOpen((v) => !v)}
+        onToggleVoice={() => setVoiceOpen((v) => !v)}
       />
 
       {gameOpen && (
         <GamePanel game={game} compact={mobile} onStart={socket.startGame} onClose={() => setGameOpen(false)} />
       )}
+
+      {voiceOpen && <VoicePanel voice={voice} compact={mobile} onClose={() => setVoiceOpen(false)} />}
 
       {tvOpen && (
         <TvPanel

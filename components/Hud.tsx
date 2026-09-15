@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { EMOTES } from "../lib/hall-types";
 import type { ContextState, PlayerState } from "../lib/hall-types";
+import type { VoiceStatus } from "../lib/useVoice";
 import Joystick from "./Joystick";
 
 interface Props {
@@ -25,6 +26,9 @@ interface Props {
   context?: ContextState;
   gameStatus?: string;
   gameOpen?: boolean;
+  voiceStatus?: VoiceStatus;
+  voiceOpen?: boolean;
+  voiceCount?: number;
   onSignOut?: () => void;
   onEmote: (e: string) => void;
   onPoke: () => void;
@@ -33,6 +37,7 @@ interface Props {
   onToss: () => void;
   onToggleTv: () => void;
   onToggleGame: () => void;
+  onToggleVoice: () => void;
 }
 
 export default function Hud(p: Props) {
@@ -143,6 +148,19 @@ export default function Hud(p: Props) {
             title="star scramble mini-game"
           >
             ⭐ {p.gameStatus === "playing" ? "playing!" : "game"}
+          </button>
+          <button
+            className={`${btn} ${p.voiceOpen ? "!bg-[#8ce8c0] !text-[#234034]" : ""}`}
+            onClick={p.onToggleVoice}
+            title="voice channel"
+          >
+            <span className="relative text-base">
+              🎙️
+              {p.voiceStatus === "live" && (
+                <span className="absolute -right-1 -top-1 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white" />
+              )}
+            </span>{" "}
+            {p.voiceStatus === "live" ? `voice${p.voiceCount ? ` · ${p.voiceCount}` : ""}` : "voice"}
           </button>
           <button
             className={`${btn} ${p.tvOpen ? "!bg-[#ff8fab] !text-white" : ""}`}
@@ -283,6 +301,9 @@ function MobileHud(
             </button>
             <button className={mini} onClick={() => { p.onToggleGame(); setMenuOpen(false); }}>
               ⭐ {p.gameStatus === "playing" ? "scramble!" : "star game"}
+            </button>
+            <button className={mini} onClick={() => { p.onToggleVoice(); setMenuOpen(false); }}>
+              🎙️ {p.voiceStatus === "live" ? `voice · ${p.voiceCount ?? ""}` : "voice chat"}
             </button>
           </div>
           {!p.nearName && <p className="px-1 pt-1 text-[10px] font-medium text-[#a99cbb]">walk up to a friend to poke ✋</p>}
