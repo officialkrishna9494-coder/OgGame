@@ -130,6 +130,8 @@ app.prepare().then(() => {
         facing: Math.PI,
         moving: false,
         sitting: false,
+        seat: null,
+        seatMode: null,
         jumping: false,
       });
       socket.to("hall").emit("hall:toast", `${clean} stepped in ✨`);
@@ -156,6 +158,8 @@ app.prepare().then(() => {
         actionAt: players.get(socket.id)?.actionAt,
         actionTarget: players.get(socket.id)?.actionTarget ?? null,
         hitAt: players.get(socket.id)?.hitAt,
+        seat: typeof p.seat === "number" ? p.seat : null,
+        seatMode: p.seatMode === "sofa" ? "sofa" : null,
       });
       dirty = true;
     });
@@ -192,10 +196,10 @@ app.prepare().then(() => {
     socket.on("hall:poke", action("poke"));
     socket.on("hall:highfive", action("highfive"));
 
-    socket.on("hall:sit", ({ sitting }) => {
+    socket.on("hall:sit", ({ sitting, seatMode }) => {
       const cur = players.get(socket.id);
       if (!cur) return;
-      players.set(socket.id, { ...cur, sitting: !!sitting });
+      players.set(socket.id, { ...cur, sitting: !!sitting, seatMode: seatMode === "sofa" ? "sofa" : null });
       dirty = true;
     });
 

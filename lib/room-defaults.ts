@@ -71,12 +71,20 @@ export const DEFAULT_ROOM: RoomConfig = {
   ],
 };
 
-export const SOFA_SEATS: Array<{ x: number; z: number; facing: number }> = [
-  { x: -2.2, z: 5.55, facing: Math.PI },
-  { x: -1.1, z: 5.6, facing: Math.PI },
-  { x: 0, z: 5.62, facing: Math.PI },
-  { x: 1.1, z: 5.6, facing: Math.PI },
-  { x: 2.2, z: 5.55, facing: Math.PI },
+export interface SofaSeat {
+  x: number;
+  z: number;
+  y: number;
+  facing: number;
+}
+
+// Perched ON the front edge of the cushions (not buried inside the sofa).
+export const SOFA_SEATS: SofaSeat[] = [
+  { x: -2.2, z: 5.0, y: 0.55, facing: Math.PI },
+  { x: -1.1, z: 5.0, y: 0.55, facing: Math.PI },
+  { x: 0, z: 5.0, y: 0.55, facing: Math.PI },
+  { x: 1.1, z: 5.0, y: 0.55, facing: Math.PI },
+  { x: 2.2, z: 5.0, y: 0.55, facing: Math.PI },
 ];
 
 // Static colliders in hall space (x,z half-extents). Keeps physics in one place

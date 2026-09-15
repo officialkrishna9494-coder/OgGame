@@ -16,6 +16,10 @@ export interface PlayerState {
   facing: number; // radians, 0 = facing camera (+z)
   moving: boolean;
   sitting: boolean;
+  // sitting detail: seat = sofa seat index (perched on the sofa),
+  // seatMode "sofa" = gliding to a seat, null = sitting in place.
+  seat?: number | null;
+  seatMode?: "sofa" | null;
   jumping: boolean;
   emote?: string;
   emoteAt?: number;

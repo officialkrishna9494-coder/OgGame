@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import AuthGate from "../components/AuthGate";
+import AddLinkPanel from "../components/AddLinkPanel";
 import GamePanel from "../components/GamePanel";
 import Hud from "../components/Hud";
 import RotatePrompt from "../components/RotatePrompt";
@@ -22,14 +23,16 @@ import { dbConfigured } from "../lib/db";
 import { popSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
 import { IDLE_CONTEXT, type BallState, type ContextState, type PlayerState } from "../lib/hall-types";
+import { stampRoom } from "../lib/room-store";
 
 const HallScene = dynamic(() => import("../components/HallScene"), { ssr: false });
 
 function HallClient({ me }: { me: Identity }) {
-  const { room } = useRoom();
+  const { room, updateRoom } = useRoom();
   const [tvOpen, setTvOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
   const [nearId, setNearId] = useState<string | null>(null);
   const [nearName, setNearName] = useState<string | null>(null);
   const [context, setContext] = useState<ContextState>(IDLE_CONTEXT);
@@ -77,6 +80,25 @@ function HallClient({ me }: { me: Identity }) {
   const handleContext = useCallback((c: ContextState) => setContext(c), []);
   const handleCollect = useCallback((starId: string) => socket.collectStar(starId), [socket]);
   const handleHit = useCallback(() => socket.sendHit(), [socket]);
+  const handleSofaSit = useCallback(() => socket.sendAction("sit", null, { seatMode: "sofa" }), [socket]);
+
+  // anyone near the TV can put ONE link on the shared shelf (synced via room)
+  const handleAddVideo = useCallback(
+    (videoId: string, title: string) => {
+      setLinkOpen(false);
+      if (room.tv.length >= 30) {
+        socket.pushToast("the shelf is full (30) — remove one from /admin 📺");
+        return;
+      }
+      if (room.tv.some((v) => v.id === videoId)) {
+        socket.pushToast("that's already on the shelf 😉");
+        return;
+      }
+      updateRoom(stampRoom({ ...room, tv: [...room.tv, { id: videoId, title }] }));
+      socket.pushToast(`📺 ${me.name} added “${title.slice(0, 30)}”`);
+    },
+    [room, updateRoom, socket, me.name]
+  );
 
   const sitting = players["me"]?.sitting ?? false;
 
@@ -124,10 +146,12 @@ function HallClient({ me }: { me: Identity }) {
         onPoke={() => socket.sendAction("poke", nearId)}
         onHighfive={() => socket.sendAction("highfive", nearId)}
         onSit={() => socket.sendAction("sit")}
+        onSofaSit={handleSofaSit}
         onToss={() => hallToss.fn?.()}
         onToggleTv={() => setTvOpen((v) => !v)}
         onToggleGame={() => setGameOpen((v) => !v)}
         onToggleVoice={() => setVoiceOpen((v) => !v)}
+        onOpenAddLink={() => setLinkOpen(true)}
       />
 
       {gameOpen && (
@@ -135,6 +159,8 @@ function HallClient({ me }: { me: Identity }) {
       )}
 
       {voiceOpen && <VoicePanel voice={voice} compact={mobile} onClose={() => setVoiceOpen(false)} />}
+
+      {linkOpen && <AddLinkPanel onAdd={handleAddVideo} onClose={() => setLinkOpen(false)} />}
 
       {tvOpen && (
         <TvPanel

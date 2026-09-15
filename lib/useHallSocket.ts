@@ -185,12 +185,18 @@ export function useHallSocket(me: JoinInfo | null) {
   );
 
   const sendAction = useCallback(
-    (kind: "poke" | "highfive" | "sit" | "wave", targetId?: string | null) => {
+    (kind: "poke" | "highfive" | "sit" | "wave", targetId?: string | null, opts?: { seatMode?: "sofa" | null }) => {
       if (!localRef.current) return;
       if (kind === "sit") {
-        const p = { ...localRef.current, sitting: !localRef.current.sitting };
+        const sitting = !localRef.current.sitting;
+        const p = {
+          ...localRef.current,
+          sitting,
+          seatMode: (sitting ? (opts?.seatMode ?? null) : null) as "sofa" | null,
+          seat: null,
+        };
         localRef.current = p;
-        emit("hall:sit", { sitting: p.sitting });
+        emit("hall:sit", { sitting: p.sitting, seatMode: p.seatMode });
         setSnapshot((s) => ({ ...s, players: { ...s.players, [p.id]: p } }));
         return;
       }

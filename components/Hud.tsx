@@ -34,10 +34,46 @@ interface Props {
   onPoke: () => void;
   onHighfive: () => void;
   onSit: () => void;
+  onSofaSit: () => void;
   onToss: () => void;
   onToggleTv: () => void;
   onToggleGame: () => void;
   onToggleVoice: () => void;
+  onOpenAddLink: () => void;
+}
+
+// ─── the one universal ACT button ───────────────────────────────────────────
+// Same priority everywhere: toss (holding) → add link (near TV) → play
+// (on the rug, game idle) → sofa sit/stand. Everything else lives in menus.
+interface PrimaryAction {
+  key: string;
+  icon: string;
+  label: string;
+  glow: string;
+  run: () => void;
+}
+
+function primaryAction(
+  ctx: ContextState | undefined,
+  flags: { sitting: boolean; gameStatus?: string },
+  h: { onToss: () => void; onOpenAddLink: () => void; onToggleGame: () => void; onSofaSit: () => void }
+): PrimaryAction | null {
+  if (!ctx) return null;
+  if (ctx.holdingBall)
+    return { key: "toss", icon: "⚽", label: "toss", glow: "#ff6b6b", run: h.onToss };
+  if (ctx.nearTv)
+    return { key: "addlink", icon: "🔗", label: "add link", glow: "#ff8fab", run: h.onOpenAddLink };
+  if (ctx.nearGame && flags.gameStatus === "idle")
+    return { key: "play", icon: "⭐", label: "play", glow: "#ffb703", run: h.onToggleGame };
+  if (ctx.nearSofa)
+    return {
+      key: flags.sitting ? "stand" : "sit",
+      icon: "🛋️",
+      label: flags.sitting ? "stand" : "sit",
+      glow: "#a0c4ff",
+      run: h.onSofaSit,
+    };
+  return null;
 }
 
 export default function Hud(p: Props) {
@@ -50,6 +86,12 @@ export default function Hud(p: Props) {
 
   const btn =
     "flex h-11 items-center justify-center gap-1.5 rounded-2xl bg-white/85 px-3.5 text-[13px] font-bold text-[#4a3f55] shadow-[0_6px_20px_-8px_rgba(90,70,110,0.4)] ring-1 ring-black/[0.06] backdrop-blur transition-all hover:bg-white active:scale-95 disabled:opacity-35 disabled:saturation-50";
+
+  const primary = primaryAction(
+    p.context,
+    { sitting: p.sitting, gameStatus: p.gameStatus },
+    { onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
+  );
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between">
@@ -123,6 +165,17 @@ export default function Hud(p: Props) {
           </div>
         )}
         <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-[22px] bg-[#3d3347]/10 p-1.5 backdrop-blur">
+          {primary && (
+            <button
+              key={primary.key}
+              className={`${btn} animate-pop-in !bg-[#3d3347] !text-white`}
+              style={{ boxShadow: `0 8px 24px -8px ${primary.glow}` }}
+              onClick={primary.run}
+              title={`act · ${primary.label}`}
+            >
+              <span className="text-base">{primary.icon}</span> ⚡{primary.label}
+            </button>
+          )}
           <button className={btn} onClick={() => setEmoteOpen((v) => !v)} title="send emoji">
             <span className="text-base">😊</span> react
           </button>
@@ -135,12 +188,9 @@ export default function Hud(p: Props) {
           <button
             className={`${btn} ${p.sitting ? "!bg-[#3d3347] !text-white" : ""}`}
             onClick={p.onSit}
-            title="sit on the sofa"
+            title="sit right here"
           >
-            🛋️ {p.sitting ? "stand" : "sit"}
-          </button>
-          <button className={btn} onClick={p.onToss} title="toss the ball">
-            ⚽ toss
+            💺 {p.sitting ? "stand" : "sit"}
           </button>
           <button
             className={`${btn} ${p.gameOpen ? "!bg-[#ffb703] !text-white" : ""}`}
@@ -190,16 +240,12 @@ function MobileHud(
   const ctx = p.context;
   const { menuOpen, setMenuOpen } = p;
 
-  // one contextual hero action, driven by where you stand
-  const primary = ctx?.holdingBall
-    ? { key: "toss", icon: "⚽", label: "toss", fn: p.onToss, glow: "#ff6b6b" }
-    : ctx?.nearGame && p.gameStatus === "idle"
-      ? { key: "play", icon: "⭐", label: "play", fn: p.onToggleGame, glow: "#ffb703" }
-      : ctx?.nearSofa
-        ? { key: p.sitting ? "stand" : "sit", icon: "🛋️", label: p.sitting ? "stand" : "sit", fn: p.onSit, glow: "#a0c4ff" }
-        : ctx?.nearTv
-          ? { key: "tv", icon: "📺", label: p.tvOpen ? "hide" : "watch", fn: p.onToggleTv, glow: "#bdb2ff" }
-          : null;
+  // the one universal ACT button — same priority as desktop
+  const primary = primaryAction(
+    ctx,
+    { sitting: p.sitting, gameStatus: p.gameStatus },
+    { onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
+  );
 
   const showBallHint = ctx && !ctx.holdingBall && ctx.nearBall;
 
@@ -248,17 +294,18 @@ function MobileHud(
         )}
       </div>
 
-      {/* ── left rail ── */}
+      {/* ── left rail: the one universal ACT button + ⋯ menu ── */}
       <div className="absolute left-2.5 top-1/2 flex -translate-y-1/2 flex-col items-center gap-2">
         {primary && (
           <button
             key={primary.key}
-            onClick={primary.fn}
+            onClick={primary.run}
             style={{ boxShadow: `0 10px 28px -8px ${primary.glow}`, borderColor: primary.glow }}
-            className="animate-pop-in pointer-events-auto flex h-16 w-16 flex-col items-center justify-center rounded-full border-2 bg-white/95 backdrop-blur transition-transform active:scale-90"
+            className="animate-pop-in pointer-events-auto flex h-[72px] w-[72px] flex-col items-center justify-center rounded-full border-2 bg-white/95 backdrop-blur transition-transform active:scale-90"
           >
             <span className="text-2xl leading-none">{primary.icon}</span>
-            <span className="mt-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[#4a3f55]">{primary.label}</span>
+            <span className="mt-0.5 text-[10px] font-black uppercase tracking-widest text-[#3d3347]">act</span>
+            <span className="-mt-0.5 text-[8px] font-bold uppercase tracking-wide text-[#8a7f98]">{primary.label}</span>
           </button>
         )}
 
@@ -301,6 +348,9 @@ function MobileHud(
             </button>
             <button className={mini} onClick={() => { p.onToggleTv(); setMenuOpen(false); }}>
               📺 {p.tvOpen ? "hide tv" : "watch tv"}
+            </button>
+            <button className={mini} onClick={() => { p.onSit(); setMenuOpen(false); }}>
+              💺 {p.sitting ? "stand up" : "sit here"}
             </button>
             <button className={mini} onClick={() => { p.onToggleGame(); setMenuOpen(false); }}>
               ⭐ {p.gameStatus === "playing" ? "scramble!" : "star game"}

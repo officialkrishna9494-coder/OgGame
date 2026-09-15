@@ -901,22 +901,31 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         iz /= len;
       }
       const sitting = st.players[MY_ID]?.sitting ?? me.sitting;
+      const sofaMode = sitting && st.players[MY_ID]?.seatMode === "sofa";
+      let mySeat = st.players[MY_ID]?.seat ?? null;
 
       if (sitting) {
-        // glide to nearest sofa seat
-        let best = SOFA_SEATS[0];
-        let bd = 1e9;
-        for (const s of SOFA_SEATS) {
-          const d = Math.hypot(me.x - s.x, me.z - s.z);
-          if (d < bd) {
-            bd = d;
-            best = s;
-          }
-        }
-        me.x += (best.x - me.x) * Math.min(1, dt * 6);
-        me.z += (best.z - me.z) * Math.min(1, dt * 6);
         me.vx = me.vz = 0;
-        me.facing += (best.facing - me.facing) * Math.min(1, dt * 6);
+        if (sofaMode) {
+          // perch ON the nearest sofa seat (front edge of the cushions)
+          let best = 0;
+          let bd = 1e9;
+          for (let i = 0; i < SOFA_SEATS.length; i++) {
+            const s = SOFA_SEATS[i];
+            const d = Math.hypot(me.x - s.x, me.z - s.z);
+            if (d < bd) {
+              bd = d;
+              best = i;
+            }
+          }
+          mySeat = best;
+          const seat = SOFA_SEATS[best];
+          me.x += (seat.x - me.x) * Math.min(1, dt * 6);
+          me.z += (seat.z - me.z) * Math.min(1, dt * 6);
+          me.y += (seat.y - me.y) * Math.min(1, dt * 6);
+          me.facing += (seat.facing - me.facing) * Math.min(1, dt * 6);
+        }
+        // floor-sit: stay exactly where you stand (no glide, no sink)
       } else {
         const ACCEL = 30;
         const MAX = 4.4;
@@ -946,21 +955,23 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         me.vy = 0;
       }
 
-      // collisions
-      for (const c of COLLIDERS) {
-        const r = resolveCircleAABB(me.x, me.z, 0.38, c);
-        me.x = r.x;
-        me.z = r.z;
-      }
-      // soft player-player push
-      for (const [id, p] of Object.entries(st.players)) {
-        if (id === MY_ID) continue;
-        const dx = me.x - p.x;
-        const dz = me.z - p.z;
-        const d = Math.hypot(dx, dz);
-        if (d < 0.75 && d > 1e-4) {
-          me.x = p.x + (dx / d) * 0.75;
-          me.z = p.z + (dz / d) * 0.75;
+      // collisions — skipped while sitting (perched sitters rest ON furniture)
+      if (!sitting) {
+        for (const c of COLLIDERS) {
+          const r = resolveCircleAABB(me.x, me.z, 0.38, c);
+          me.x = r.x;
+          me.z = r.z;
+        }
+        // soft player-player push
+        for (const [id, p] of Object.entries(st.players)) {
+          if (id === MY_ID) continue;
+          const dx = me.x - p.x;
+          const dz = me.z - p.z;
+          const d = Math.hypot(dx, dz);
+          if (d < 0.75 && d > 1e-4) {
+            me.x = p.x + (dx / d) * 0.75;
+            me.z = p.z + (dz / d) * 0.75;
+          }
         }
       }
       me.x = Math.max(-HALL_BOUNDS.x, Math.min(HALL_BOUNDS.x, me.x));
@@ -1086,6 +1097,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           facing: me.facing,
           moving,
           sitting,
+          seat: mySeat,
+          seatMode: sofaMode ? "sofa" : null,
           jumping: me.y > 0.02,
           ...freshEmote,
           ...freshAction,
@@ -1177,7 +1190,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         const walking = id === MY_ID ? speed > 0.4 : p.moving;
         rig.walkPhase += dt * (walking ? 11 : 2);
         const bob = walking ? Math.abs(Math.sin(rig.walkPhase)) * 0.09 : Math.sin(elapsed * 2 + rig.walkPhase) * 0.025;
-        const baseY = (id === MY_ID ? me.y : 0) + (p.sitting ? -0.28 : 0) + bob;
+        // floor-sitters settle down; sofa-sitters ride at seat height
+        const sitDrop = p.sitting && p.seat == null ? -0.28 : 0;
+        const seatY = p.sitting && p.seat != null ? (SOFA_SEATS[p.seat]?.y ?? 0.55) : 0;
+        const baseY = (id === MY_ID ? me.y : seatY) + sitDrop + bob;
         g.position.y = baseY;
         // lean + squash
         const targetTilt = walking ? 0.12 : 0;
