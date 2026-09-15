@@ -8,6 +8,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { BallState, ContextState, GameState, PlayerState, RoomConfig, TvState } from "../lib/hall-types";
+import { IDLE_CONTEXT } from "../lib/hall-types";
 import { joyState } from "../lib/joy-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 
@@ -339,6 +340,14 @@ function createAvatar(color: string, name: string): AvatarRig {  const group = n
   return { group, body, head, armL, armR, footL, footR, label, emote: null, emoteUntil: 0, ring, walkPhase: Math.random() * 6, wasHit: false };
 }
 
+// shortest-path angle lerp (stops the sit-down 360° spin)
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
+
 export const hallToss: { fn: null | (() => void) } = { fn: null };
 
 export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, onMove, onBall, onNear, onContext, onCollect, onHit }: Props) {
@@ -495,7 +504,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       leg.position.set(lx, 0.12, lz);
       sofa.add(leg);
     }
-    sofa.position.set(0, 0, 5.5);
+    sofa.position.set(0, 0, 7.0);
     scene.add(sofa);
 
     // coffee table
@@ -868,6 +877,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     const nearIdRef = { current: null as string | null };
     let lastTvSig = "";
     let lastCtxSig = "";
+    let lastCtx: ContextState = { ...IDLE_CONTEXT };
     const claimedStars = new Set<string>();
     // ball ownership optimism: instant local feedback across the ~100ms echo
     let optimisticHold = false;
@@ -920,10 +930,11 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           }
           mySeat = best;
           const seat = SOFA_SEATS[best];
-          me.x += (seat.x - me.x) * Math.min(1, dt * 6);
-          me.z += (seat.z - me.z) * Math.min(1, dt * 6);
-          me.y += (seat.y - me.y) * Math.min(1, dt * 6);
-          me.facing += (seat.facing - me.facing) * Math.min(1, dt * 6);
+          const k = Math.min(1, dt * 6);
+          me.x += (seat.x - me.x) * k;
+          me.z += (seat.z - me.z) * k;
+          me.y += (seat.y - me.y) * k;
+          me.facing = lerpAngle(me.facing, seat.facing, k);
         }
         // floor-sit: stay exactly where you stand (no glide, no sink)
       } else {
@@ -947,11 +958,16 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         if (sp > 0.4) me.facing = Math.atan2(me.vx, me.vz);
       }
 
-      // gravity / jump
-      me.vy -= 14 * dt;
-      me.y += me.vy * dt;
-      if (me.y <= 0) {
-        me.y = 0;
+      // gravity / jump — skipped while sitting so gravity never fights
+      // the seat glide (that fight was the perched "jumping" jitter)
+      if (!sitting) {
+        me.vy -= 14 * dt;
+        me.y += me.vy * dt;
+        if (me.y <= 0) {
+          me.y = 0;
+          me.vy = 0;
+        }
+      } else {
         me.vy = 0;
       }
 
@@ -1125,15 +1141,29 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         cbRef.current.onNear(nearId, nearName);
       }
 
-      // ── contextual zones (sofa / ball / tv / game rug) ──
-      // Designed to grow: future mini-games just add another zone + flag.
+      // ── contextual zones with hysteresis ─────────────────────────────
+      // Enter radius < exit radius per zone: crossing a boundary can't
+      // flutter the ACT button anymore. Zones are also spaced apart now
+      // (sofa moved back to z=7, game rug stays at z=2.2).
+      const dGame = Math.hypot(me.x, me.z - 2.2);
+      const nearGame = lastCtx.nearGame ? dGame < 3.9 : dGame < 3.2;
+      const dxSofa = Math.abs(me.x);
+      const dzSofa = Math.abs(me.z - 7.0);
+      const nearSofa = lastCtx.nearSofa
+        ? dxSofa < 4.4 && dzSofa < 2.6
+        : dxSofa < 3.8 && dzSofa < 2.0;
+      const dTv = Math.hypot(me.x, me.z + 9.6);
+      const nearTv = lastCtx.nearTv ? dTv < 4.3 : dTv < 3.6;
+      const dBall = Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z);
+      const nearBall = lastCtx.nearBall ? dBall < 2.0 : dBall < 1.5;
       const ctx: ContextState = {
-        nearSofa: Math.abs(me.x) < 3.8 && Math.abs(me.z - 5.5) < 2.1,
-        nearBall: Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z) < 1.7,
+        nearSofa,
+        nearBall,
         holdingBall: ballPhys.holderId === MY_ID,
-        nearTv: Math.hypot(me.x, me.z + 9.6) < 3.8,
-        nearGame: Math.hypot(me.x, me.z - 2.2) < 3.6,
+        nearTv,
+        nearGame,
       };
+      lastCtx = ctx;
       const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}${ctx.nearGame ? 1 : 0}`;
       if (ctxSig !== lastCtxSig) {
         lastCtxSig = ctxSig;

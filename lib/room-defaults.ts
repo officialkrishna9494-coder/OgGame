@@ -79,18 +79,19 @@ export interface SofaSeat {
 }
 
 // Perched ON the front edge of the cushions (not buried inside the sofa).
+// Sofa lives at z=7.0, well clear of the game rug (center z=2.2).
 export const SOFA_SEATS: SofaSeat[] = [
-  { x: -2.2, z: 5.0, y: 0.55, facing: Math.PI },
-  { x: -1.1, z: 5.0, y: 0.55, facing: Math.PI },
-  { x: 0, z: 5.0, y: 0.55, facing: Math.PI },
-  { x: 1.1, z: 5.0, y: 0.55, facing: Math.PI },
-  { x: 2.2, z: 5.0, y: 0.55, facing: Math.PI },
+  { x: -2.2, z: 6.5, y: 0.55, facing: Math.PI },
+  { x: -1.1, z: 6.5, y: 0.55, facing: Math.PI },
+  { x: 0, z: 6.5, y: 0.55, facing: Math.PI },
+  { x: 1.1, z: 6.5, y: 0.55, facing: Math.PI },
+  { x: 2.2, z: 6.5, y: 0.55, facing: Math.PI },
 ];
 
 // Static colliders in hall space (x,z half-extents). Keeps physics in one place
 // so client prediction + server relay agree.
 export const COLLIDERS = [
-  { x: 0, z: 5.5, hx: 3.0, hz: 0.8 }, // sofa
+  { x: 0, z: 7.0, hx: 3.0, hz: 0.8 }, // sofa
   { x: 0, z: 3.0, hx: 1.5, hz: 0.8 }, // coffee table
   { x: 0, z: -10.8, hx: 3.4, hz: 0.7 }, // tv stand
   { x: 8.5, z: -11.9, hx: 1.8, hz: 0.6 }, // bookshelf
