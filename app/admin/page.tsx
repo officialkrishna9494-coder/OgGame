@@ -9,6 +9,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { DEFAULT_ROOM, NEXT_FRAME_SLOT } from "../../lib/room-defaults";
 import { loadRoom, saveRoom } from "../../lib/room-store";
+import { AUTH_MODE } from "../../lib/auth";
+import { dbConfigured } from "../../lib/db";
+import { cloudinaryConfigured, uploadImage } from "../../lib/media";
 import type { RoomConfig } from "../../lib/hall-types";
 
 const PASSCODE = "cozy123";
@@ -37,6 +40,9 @@ export default function AdminPage() {
     const next = { ...room, ...p };
     setRoom(next);
     saveRoom(next);
+    if (dbConfigured()) {
+      import("../../lib/db").then((m) => m.saveRoomCloud(next).catch(() => {}));
+    }
   };
 
   if (!unlocked) {
@@ -82,6 +88,21 @@ export default function AdminPage() {
             ← hall
           </Link>
         </div>
+
+        {/* backend status */}
+        <section className="mt-4 flex flex-wrap gap-2">
+          <StatusPill ok label={`auth · ${AUTH_MODE}`} hint={AUTH_MODE === "firebase" ? "Google sign-in" : "dev quickplay"} />
+          <StatusPill
+            ok={dbConfigured()}
+            label={dbConfigured() ? "Firestore · live" : "Firestore · local"}
+            hint={dbConfigured() ? "rooms/cozy-hall syncs to friends" : "add Firebase vars to sync"}
+          />
+          <StatusPill
+            ok={cloudinaryConfigured()}
+            label={cloudinaryConfigured() ? "Cloudinary · ready" : "Cloudinary · off"}
+            hint={cloudinaryConfigured() ? "uploads enabled below" : "add cloud name + preset"}
+          />
+        </section>
 
         {/* basics */}
         <section className={`${card} mt-4`}>
@@ -144,7 +165,20 @@ export default function AdminPage() {
           </div>
           <div className="mt-3 grid gap-3">
             {room.frames.map((f, i) => (
-              <div key={f.id} className="grid gap-2 rounded-2xl bg-[#faf6ef] p-3 sm:grid-cols-[1fr_1fr_auto]">
+              <div key={f.id} className="grid gap-2 rounded-2xl bg-[#faf6ef] p-3 sm:grid-cols-[64px_1fr_1fr_auto]">
+                <div className="flex items-center">
+                  {f.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={f.imageUrl} alt="" className="h-16 w-16 rounded-xl object-cover ring-1 ring-black/10" />
+                  ) : (
+                    <span
+                      className="flex h-16 w-16 items-center justify-center rounded-xl text-xl ring-1 ring-black/10"
+                      style={{ background: `linear-gradient(135deg, hsl(${f.hue},70%,78%), hsl(${(f.hue + 50) % 360},65%,62%))` }}
+                    >
+                      🖼️
+                    </span>
+                  )}
+                </div>
                 <div>
                   <span className={label}>title</span>
                   <input
@@ -156,6 +190,27 @@ export default function AdminPage() {
                     }}
                     className={input}
                   />
+                  <div className="mt-1.5 flex gap-1.5">
+                    <UploadButton
+                      onUrl={(url) => {
+                        const frames = [...room.frames];
+                        frames[i] = { ...f, imageUrl: url };
+                        patch({ frames });
+                      }}
+                    />
+                    {f.imageUrl && (
+                      <button
+                        onClick={() => {
+                          const frames = [...room.frames];
+                          frames[i] = { ...f, imageUrl: undefined };
+                          patch({ frames });
+                        }}
+                        className="rounded-lg bg-black/[0.05] px-2 py-1 text-[11px] font-bold text-[#8a7f98]"
+                      >
+                        gradient
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <span className={label}>caption / image url (Cloudinary)</span>
@@ -190,7 +245,17 @@ export default function AdminPage() {
           <h2 className="text-sm font-extrabold text-[#3d3347]">posters · {room.posters.length}</h2>
           <div className="mt-3 grid gap-3">
             {room.posters.map((poster, i) => (
-              <div key={poster.id} className="grid gap-2 rounded-2xl bg-[#faf6ef] p-3 sm:grid-cols-2">
+              <div key={poster.id} className="grid gap-2 rounded-2xl bg-[#faf6ef] p-3 sm:grid-cols-[64px_1fr_1fr]">
+                <div className="flex items-center">
+                  {poster.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={poster.imageUrl} alt="" className="h-16 w-16 rounded-xl object-cover ring-1 ring-black/10" />
+                  ) : (
+                    <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-white text-xl ring-1 ring-black/10">
+                      📜
+                    </span>
+                  )}
+                </div>
                 <div>
                   <span className={label}>title</span>
                   <input
@@ -202,6 +267,15 @@ export default function AdminPage() {
                     }}
                     className={input}
                   />
+                  <div className="mt-1.5">
+                    <UploadButton
+                      onUrl={(url) => {
+                        const posters = [...room.posters];
+                        posters[i] = { ...poster, imageUrl: url };
+                        patch({ posters });
+                      }}
+                    />
+                  </div>
                 </div>
                 <div>
                   <span className={label}>subtitle</span>
@@ -267,10 +341,54 @@ export default function AdminPage() {
           reset room to defaults
         </button>
         <p className="mt-3 text-center text-[11px] text-[#a99cbb]">
-          Firestore path when wired: <code className="font-mono">rooms/cozy-hall</code> · media in Cloudinary · presence stays on sockets
+          {dbConfigured()
+            ? "☁️ saving to Firestore rooms/cozy-hall — every friend sees edits live"
+            : "💾 saving locally — add Firebase vars to sync across friends"} · presence stays on sockets
         </p>
       </div>
     </main>
+  );
+}
+
+function StatusPill({ ok = true, label, hint }: { ok?: boolean; label: string; hint: string }) {
+  return (
+    <span title={hint} className="flex items-center gap-1.5 rounded-full bg-white/85 px-3 py-1.5 text-[11px] font-bold text-[#4a3f55] shadow-sm ring-1 ring-black/[0.06]">
+      <span className={`block h-2 w-2 rounded-full ${ok ? "bg-green-500" : "bg-amber-400"}`} />
+      {label}
+    </span>
+  );
+}
+
+function UploadButton({ onUrl }: { onUrl: (url: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (!cloudinaryConfigured()) {
+    return <span className="text-[11px] font-medium text-[#a99cbb]">add Cloudinary keys for uploads ↑</span>;
+  }
+  return (
+    <span className="inline-flex flex-col gap-1">
+      <label className="cursor-pointer rounded-lg bg-[#efe8f7] px-2.5 py-1.5 text-[11px] font-bold text-[#4a3f55] transition-colors hover:bg-[#e2d6f2]">
+        {busy ? "uploading…" : "📤 upload photo"}
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (!f) return;
+            setBusy(true);
+            setErr(null);
+            uploadImage(f)
+              .then((url) => onUrl(url))
+              .catch((ex: unknown) => setErr(ex instanceof Error ? ex.message : "upload failed"))
+              .finally(() => setBusy(false));
+          }}
+        />
+      </label>
+      {err && <span className="text-[11px] font-semibold text-[#b03939]">{err}</span>}
+    </span>
   );
 }
 

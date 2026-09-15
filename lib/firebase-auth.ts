@@ -8,7 +8,7 @@ import { colorForName, type Identity } from "./auth";
 
 let app: FirebaseApp | null = null;
 
-async function getApp(): Promise<FirebaseApp> {
+export async function getFirebaseApp(): Promise<FirebaseApp> {
   if (app) return app;
   const { initializeApp, getApps } = await import("firebase/app");
   app =
@@ -27,6 +27,7 @@ async function getApp(): Promise<FirebaseApp> {
 function identityFromUser(user: User): Identity {
   const name = (user.displayName ?? user.email?.split("@")[0] ?? "Friend").slice(0, 14);
   return {
+    uid: user.uid,
     name,
     color: colorForName(user.uid + name),
     photoUrl: user.photoURL ?? undefined,
@@ -35,20 +36,20 @@ function identityFromUser(user: User): Identity {
 }
 
 export async function signInWithGoogle(): Promise<Identity> {
-  const a = await getApp();
+  const a = await getFirebaseApp();
   const { getAuth, GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
   const cred = await signInWithPopup(getAuth(a), new GoogleAuthProvider());
   return identityFromUser(cred.user);
 }
 
 export async function watchAuth(cb: (id: Identity | null) => void): Promise<() => void> {
-  const a = await getApp();
+  const a = await getFirebaseApp();
   const { getAuth, onAuthStateChanged } = await import("firebase/auth");
   return onAuthStateChanged(getAuth(a), (user) => cb(user ? identityFromUser(user) : null));
 }
 
 export async function signOutUser(): Promise<void> {
-  const a = await getApp();
+  const a = await getFirebaseApp();
   const { getAuth, signOut } = await import("firebase/auth");
   await signOut(getAuth(a));
 }

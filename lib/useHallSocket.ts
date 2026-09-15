@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import type { BallState, PlayerState, TvState } from "./hall-types";
+import { IDLE_GAME, type BallState, type GameState, type PlayerState, type TvState } from "./hall-types";
 
 export interface HallSnapshot {
   connected: boolean;
@@ -16,6 +16,7 @@ export interface HallSnapshot {
   players: Record<string, PlayerState>;
   ball: BallState;
   tv: TvState;
+  game: GameState;
   toasts: string[];
 }
 
@@ -53,6 +54,7 @@ export function useHallSocket(me: JoinInfo | null) {
     players: {},
     ball: { x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null },
     tv: { playlist: [], index: 0, playing: false, updatedAt: 0 },
+    game: IDLE_GAME,
     toasts: [],
   });
 
@@ -114,7 +116,7 @@ export function useHallSocket(me: JoinInfo | null) {
       socket.emit("hall:join", { name: me?.name ?? "Friend", color: me?.color ?? "#ffb3c7" });
     });
     socket.on("connect_error", failToBots);
-    socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState }) => {
+    socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState; game?: GameState }) => {
       // The server echoes our own player back under our socket.id — drop it so
       // we render exactly ONE self avatar (the local "me" prediction).
       const mine = socket.id;
@@ -124,11 +126,13 @@ export function useHallSocket(me: JoinInfo | null) {
       const ball = state.ball?.holderId === mine ? { ...state.ball, holderId: "me" } : state.ball;
       ballRef.current = ball;
       tvRef.current = state.tv;
+      const game = state.game ?? IDLE_GAME;
       setSnapshot((s) => ({
         ...s,
         players: { ...others, ...(localRef.current ? { [localRef.current.id]: localRef.current } : {}) },
         ball,
         tv: state.tv,
+        game,
       }));
     });
     socket.on("hall:toast", (text: string) => pushToast(text));
@@ -248,6 +252,17 @@ export function useHallSocket(me: JoinInfo | null) {
     [emit]
   );
 
+  const startGame = useCallback(() => {
+    emit("game:start", {});
+  }, [emit]);
+
+  const collectStar = useCallback(
+    (starId: string) => {
+      emit("game:collect", { starId });
+    },
+    [emit]
+  );
+
   return {
     snapshot,
     connected: snapshot.connected,
@@ -259,6 +274,8 @@ export function useHallSocket(me: JoinInfo | null) {
     tossBall,
     setBall,
     tvControl,
+    startGame,
+    collectStar,
     pushToast,
   };
 }

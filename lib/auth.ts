@@ -12,6 +12,7 @@
 import { AVATAR_COLORS } from "./hall-types";
 
 export interface Identity {
+  uid?: string;
   name: string;
   color: string;
   photoUrl?: string;

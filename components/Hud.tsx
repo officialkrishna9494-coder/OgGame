@@ -23,6 +23,8 @@ interface Props {
   photoUrl?: string;
   mobile?: boolean;
   context?: ContextState;
+  gameStatus?: string;
+  gameOpen?: boolean;
   onSignOut?: () => void;
   onEmote: (e: string) => void;
   onPoke: () => void;
@@ -30,6 +32,7 @@ interface Props {
   onSit: () => void;
   onToss: () => void;
   onToggleTv: () => void;
+  onToggleGame: () => void;
 }
 
 export default function Hud(p: Props) {
@@ -135,6 +138,13 @@ export default function Hud(p: Props) {
             ⚽ toss
           </button>
           <button
+            className={`${btn} ${p.gameOpen ? "!bg-[#ffb703] !text-white" : ""}`}
+            onClick={p.onToggleGame}
+            title="star scramble mini-game"
+          >
+            ⭐ {p.gameStatus === "playing" ? "playing!" : "game"}
+          </button>
+          <button
             className={`${btn} ${p.tvOpen ? "!bg-[#ff8fab] !text-white" : ""}`}
             onClick={p.onToggleTv}
             title="shared TV"
@@ -165,11 +175,13 @@ function MobileHud(
   // one contextual hero action, driven by where you stand
   const primary = ctx?.holdingBall
     ? { key: "toss", icon: "⚽", label: "toss", fn: p.onToss, glow: "#ff6b6b" }
-    : ctx?.nearSofa
-      ? { key: p.sitting ? "stand" : "sit", icon: "🛋️", label: p.sitting ? "stand" : "sit", fn: p.onSit, glow: "#a0c4ff" }
-      : ctx?.nearTv
-        ? { key: "tv", icon: "📺", label: p.tvOpen ? "hide" : "watch", fn: p.onToggleTv, glow: "#bdb2ff" }
-        : null;
+    : ctx?.nearGame && p.gameStatus === "idle"
+      ? { key: "play", icon: "⭐", label: "play", fn: p.onToggleGame, glow: "#ffb703" }
+      : ctx?.nearSofa
+        ? { key: p.sitting ? "stand" : "sit", icon: "🛋️", label: p.sitting ? "stand" : "sit", fn: p.onSit, glow: "#a0c4ff" }
+        : ctx?.nearTv
+          ? { key: "tv", icon: "📺", label: p.tvOpen ? "hide" : "watch", fn: p.onToggleTv, glow: "#bdb2ff" }
+          : null;
 
   const showBallHint = ctx && !ctx.holdingBall && ctx.nearBall;
 
@@ -268,6 +280,9 @@ function MobileHud(
             </button>
             <button className={mini} onClick={() => { p.onToggleTv(); setMenuOpen(false); }}>
               📺 {p.tvOpen ? "hide tv" : "watch tv"}
+            </button>
+            <button className={mini} onClick={() => { p.onToggleGame(); setMenuOpen(false); }}>
+              ⭐ {p.gameStatus === "playing" ? "scramble!" : "star game"}
             </button>
           </div>
           {!p.nearName && <p className="px-1 pt-1 text-[10px] font-medium text-[#a99cbb]">walk up to a friend to poke ✋</p>}

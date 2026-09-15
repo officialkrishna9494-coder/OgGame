@@ -98,12 +98,13 @@ export const AVATAR_COLORS = [  "#ffb3c7",
 
 export const EMOTES = ["❤️", "😂", "🎉", "👋", "😮", "🔥", "⭐", "💤"];
 
-// Proximity-driven contextual actions (mobile rail + future game spots).
+// Proximity-driven contextual actions (mobile rail + game spots).
 export interface ContextState {
   nearSofa: boolean;
   nearBall: boolean;
   holdingBall: boolean;
   nearTv: boolean;
+  nearGame: boolean;
 }
 
 export const IDLE_CONTEXT: ContextState = {
@@ -111,4 +112,32 @@ export const IDLE_CONTEXT: ContextState = {
   nearBall: false,
   holdingBall: false,
   nearTv: false,
+  nearGame: false,
 };
+
+// ─── Star Scramble (mini-game nº 1 — intentionally tiny) ────────────────────
+// Server owns the state; clients just walk over stars to collect them.
+export interface StarItem {
+  id: string;
+  x: number;
+  z: number;
+}
+
+export interface GameState {
+  status: "idle" | "playing" | "ended";
+  endsAt: number;
+  stars: StarItem[];
+  scores: Record<string, { name: string; points: number }>;
+  lastCollect?: { by: string; name: string; at: number };
+  winner?: string | null;
+}
+
+export const IDLE_GAME: GameState = {
+  status: "idle",
+  endsAt: 0,
+  stars: [],
+  scores: {},
+};
+
+export const GAME_DURATION_MS = 60_000;
+export const STAR_COUNT = 12;

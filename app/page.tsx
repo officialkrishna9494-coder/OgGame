@@ -5,9 +5,10 @@
 // No routes for features: everything happens in this single hall.
 // Identity comes from AuthGate (dev quickplay, nickname, or Google).
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import AuthGate from "../components/AuthGate";
+import GamePanel from "../components/GamePanel";
 import Hud from "../components/Hud";
 import RotatePrompt from "../components/RotatePrompt";
 import TvPanel from "../components/TvPanel";
@@ -15,6 +16,8 @@ import { hallToss } from "../components/HallScene";
 import { useRoom } from "../lib/room-store";
 import { useHallSocket } from "../lib/useHallSocket";
 import { useMobileLandscape } from "../lib/useMobileLandscape";
+import { dbConfigured } from "../lib/db";
+import { popSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
 import { IDLE_CONTEXT, type BallState, type ContextState, type PlayerState } from "../lib/hall-types";
 
@@ -23,13 +26,37 @@ const HallScene = dynamic(() => import("../components/HallScene"), { ssr: false 
 function HallClient({ me }: { me: Identity }) {
   const { room } = useRoom();
   const [tvOpen, setTvOpen] = useState(false);
+  const [gameOpen, setGameOpen] = useState(false);
   const [nearId, setNearId] = useState<string | null>(null);
   const [nearName, setNearName] = useState<string | null>(null);
   const [context, setContext] = useState<ContextState>(IDLE_CONTEXT);
   const mobile = useMobileLandscape();
 
   const socket = useHallSocket(me);
-  const { players, ball, tv, toasts, simulated } = socket.snapshot;
+  const { players, ball, tv, game, toasts, simulated } = socket.snapshot;
+
+  // persist Google profiles to Firestore `users/{uid}` (no-op without config)
+  useEffect(() => {
+    if (!me.uid || !dbConfigured()) return;
+    import("../lib/db").then((m) =>
+      m.saveUserProfile({ uid: me.uid!, name: me.name, color: me.color, photoUrl: me.photoUrl }).catch(() => {})
+    );
+  }, [me.uid, me.name, me.color, me.photoUrl]);
+
+  // game sounds: pop on every pickup, jingle on start / win
+  const lastAt = useRef(0);
+  const lastStatus = useRef(game.status);
+  useEffect(() => {
+    if (game.lastCollect && game.lastCollect.at > lastAt.current) {
+      lastAt.current = game.lastCollect.at;
+      popSfx();
+    }
+    if (game.status !== lastStatus.current) {
+      if (game.status === "playing") startSfx();
+      if (game.status === "ended") winSfx();
+      lastStatus.current = game.status;
+    }
+  }, [game]);
 
   const tvPlaylist = useMemo(
     () => (tv.playlist.length ? tv.playlist : room.tv),
@@ -44,6 +71,7 @@ function HallClient({ me }: { me: Identity }) {
     setNearName(name);
   }, []);
   const handleContext = useCallback((c: ContextState) => setContext(c), []);
+  const handleCollect = useCallback((starId: string) => socket.collectStar(starId), [socket]);
 
   const sitting = players["me"]?.sitting ?? false;
 
@@ -56,10 +84,12 @@ function HallClient({ me }: { me: Identity }) {
         ball={ball}
         room={room}
         tv={{ ...tv, playlist: tvPlaylist }}
+        game={game}
         onMove={handleMove}
         onBall={handleBall}
         onNear={handleNear}
         onContext={handleContext}
+        onCollect={handleCollect}
       />
 
       {/* soft vignette for coziness */}
@@ -77,6 +107,8 @@ function HallClient({ me }: { me: Identity }) {
         photoUrl={me.photoUrl}
         mobile={mobile}
         context={context}
+        gameStatus={game.status}
+        gameOpen={gameOpen}
         onSignOut={me.signOut}
         onEmote={socket.sendEmote}
         onPoke={() => socket.sendAction("poke", nearId)}
@@ -84,7 +116,12 @@ function HallClient({ me }: { me: Identity }) {
         onSit={() => socket.sendAction("sit")}
         onToss={() => hallToss.fn?.()}
         onToggleTv={() => setTvOpen((v) => !v)}
+        onToggleGame={() => setGameOpen((v) => !v)}
       />
+
+      {gameOpen && (
+        <GamePanel game={game} compact={mobile} onStart={socket.startGame} onClose={() => setGameOpen(false)} />
+      )}
 
       {tvOpen && (
         <TvPanel

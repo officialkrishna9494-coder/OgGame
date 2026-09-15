@@ -30,9 +30,28 @@ each other move. No login needed in dev — you walk straight in.
 | `NEXT_PUBLIC_AUTH_MODE=firebase` | Google Sign-in via Firebase Authentication       |
 
 For deploys with real accounts: set `AUTH_MODE=firebase` and fill in the
-`NEXT_PUBLIC_FIREBASE_*` vars. `/admin` (code `cozy123`, see `ADMIN_CODE`)
-edits the room: name, memory frames, posters, TV playlist — all data-driven,
-no hard-coding.
+`NEXT_PUBLIC_FIREBASE_*` vars. Profiles land in Firestore `users/{uid}`.
+
+## Backend: Firestore + Cloudinary
+
+Without Firebase vars the hall is fully local (room in localStorage). Add
+them and `/admin` switches to cloud mode automatically:
+
+- **Firestore** `rooms/cozy-hall` — room config, frames, posters, TV
+  playlist. Edits sync to every connected friend live via `onSnapshot`.
+- **Cloudinary** — frame/poster photos. Create an **Unsigned** upload preset
+  (dashboard → Settings → Upload), then set `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`
+  and `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET`. Upload buttons appear in admin.
+- **Socket.io** stays ephemeral: presence, movement, emotes, ball, TV sync,
+  mini-game state.
+
+## Mini-game nº 1 — ⭐ Star Scramble
+
+Open the ⭐ panel (dock on desktop, ⋯ menu on mobile, or walk onto the rug).
+Anyone can start: 12 golden stars spawn for 60 seconds, walk over them to
+score. Server validates pickups and keeps the leaderboard; winners get a
+toast + fanfare. Intentionally tiny — the next games plug into the same
+`ContextState` zone pattern.
 
 ## Architecture
 
@@ -47,3 +66,6 @@ no hard-coding.
 
 WASD / arrows to wander · space to hop · scroll to zoom · drag on mobile.
 Walk close to a friend to poke / high-five · walk over the ball to grab it.
+
+`/admin` (code `cozy123`, see `ADMIN_CODE`) edits the room: name, memory
+frames, posters, TV playlist — all data-driven, no hard-coding.

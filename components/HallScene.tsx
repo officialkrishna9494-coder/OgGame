@@ -7,7 +7,7 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { BallState, ContextState, PlayerState, RoomConfig, TvState } from "../lib/hall-types";
+import type { BallState, ContextState, GameState, PlayerState, RoomConfig, TvState } from "../lib/hall-types";
 import { joyState } from "../lib/joy-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 
@@ -18,10 +18,12 @@ interface Props {
   ball: BallState;
   room: RoomConfig;
   tv: TvState;
+  game: GameState;
   onMove: (p: PlayerState) => void;
   onBall: (b: BallState) => void;
   onNear: (nearId: string | null, nearName: string | null) => void;
   onContext: (c: ContextState) => void;
+  onCollect: (starId: string) => void;
 }
 
 const MY_ID = "me";
@@ -135,6 +137,37 @@ function posterTexture(title: string, sub: string, hue: number): THREE.CanvasTex
   return t;
 }
 
+// ─── star collectible (mini-game) ───────────────────────────────────────────
+function createStar(): THREE.Group {
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.26),
+    new THREE.MeshStandardMaterial({
+      color: "#ffd166",
+      emissive: "#ffb703",
+      emissiveIntensity: 0.9,
+      roughness: 0.3,
+    })
+  );
+  core.castShadow = true;
+  g.add(core);
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const ctx = c.getContext("2d")!;
+  const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  grad.addColorStop(0, "rgba(255, 220, 120, 0.9)");
+  grad.addColorStop(1, "rgba(255, 220, 120, 0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  const glow = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: glow, transparent: true, depthWrite: false })
+  );
+  sp.scale.set(1.5, 1.5, 1);
+  g.add(sp);
+  return g;
+}
+
 interface AvatarRig {
   group: THREE.Group;
   body: THREE.Mesh;
@@ -150,8 +183,7 @@ interface AvatarRig {
   walkPhase: number;
 }
 
-function createAvatar(color: string, name: string): AvatarRig {
-  const group = new THREE.Group();
+function createAvatar(color: string, name: string): AvatarRig {  const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.02 });
   const dark = new THREE.MeshStandardMaterial({
     color: new THREE.Color(color).multiplyScalar(0.82),
@@ -258,15 +290,15 @@ function createAvatar(color: string, name: string): AvatarRig {
 
 export const hallToss: { fn: null | (() => void) } = { fn: null };
 
-export default function HallScene({ myName, myColor, players, ball, room, tv, onMove, onBall, onNear, onContext }: Props) {
+export default function HallScene({ myName, myColor, players, ball, room, tv, game, onMove, onBall, onNear, onContext, onCollect }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ players, ball, room, tv, myName, myColor });
-  const cbRef = useRef({ onMove, onBall, onNear, onContext });
+  const stateRef = useRef({ players, ball, room, tv, game, myName, myColor });
+  const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect });
 
   // keep the long-lived Three.js loop fed with fresh props without re-creating it
   useEffect(() => {
-    stateRef.current = { players, ball, room, tv, myName, myColor };
-    cbRef.current = { onMove, onBall, onNear, onContext };
+    stateRef.current = { players, ball, room, tv, game, myName, myColor };
+    cbRef.current = { onMove, onBall, onNear, onContext, onCollect };
   });
 
   useEffect(() => {
@@ -506,14 +538,50 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
     };
     drawTv();
 
-    // memory frames (data-driven)
+    // memory frames (data-driven, Cloudinary photos when set)
     const frameGroup = new THREE.Group();
     scene.add(frameGroup);
+    const photoCache = new Map<string, THREE.Texture>();
+    const photoPending = new Set<string>();
+    const disposeGroup = (root: THREE.Object3D) => {
+      root.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          const m = o.material as THREE.Material | THREE.Material[];
+          (Array.isArray(m) ? m : [m]).forEach((x) => {
+            const withMap = x as THREE.MeshBasicMaterial;
+            // cached Cloudinary photos are shared — never dispose those
+            if (withMap.map && ![...photoCache.values()].includes(withMap.map)) withMap.map.dispose();
+            x.dispose();
+          });
+        }
+      });
+    };
+    const photoTexture = (url: string): THREE.Texture | null => {
+      const hit = photoCache.get(url);
+      if (hit) return hit;
+      if (!photoPending.has(url)) {
+        photoPending.add(url);
+        new THREE.TextureLoader().load(
+          url,
+          (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            photoCache.set(url, tex);
+            photoPending.delete(url);
+            if (!dead) rebuildFrames(); // re-run now that the photo is cached
+          },
+          undefined,
+          () => photoPending.delete(url)
+        );
+      }
+      return null;
+    };
     const rebuildFrames = () => {
       const { room: rm } = stateRef.current;
       while (frameGroup.children.length) {
-        const ch = frameGroup.children.pop()!;
+        const ch = frameGroup.children[0];
         frameGroup.remove(ch);
+        disposeGroup(ch);
       }
       for (const f of rm.frames) {
         const g = new THREE.Group();
@@ -525,7 +593,9 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
         g.add(border);
         const art = new THREE.Mesh(
           new THREE.PlaneGeometry(f.size[0], f.size[1]),
-          new THREE.MeshBasicMaterial({ map: frameTexture(f.title, f.caption, f.hue) })
+          new THREE.MeshBasicMaterial({
+            map: (f.imageUrl && photoTexture(f.imageUrl)) || frameTexture(f.title, f.caption, f.hue),
+          })
         );
         art.position.z = 0.045;
         g.add(art);
@@ -537,7 +607,9 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
         const g = new THREE.Group();
         const art = new THREE.Mesh(
           new THREE.PlaneGeometry(p.size[0], p.size[1]),
-          new THREE.MeshBasicMaterial({ map: posterTexture(p.title, p.subtitle, p.hue) })
+          new THREE.MeshBasicMaterial({
+            map: (p.imageUrl && photoTexture(p.imageUrl)) || posterTexture(p.title, p.subtitle, p.hue),
+          })
         );
         const edge = new THREE.Mesh(
           new THREE.BoxGeometry(p.size[0] + 0.08, p.size[1] + 0.08, 0.04),
@@ -661,6 +733,7 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
 
     // ── avatars ──
     const rigs = new Map<string, AvatarRig>();
+    const starMeshes = new Map<string, { group: THREE.Group; phase: number }>();
     const getRig = (id: string, p: PlayerState) => {
       let r = rigs.get(id);
       if (!r) {
@@ -735,6 +808,7 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
     const nearIdRef = { current: null as string | null };
     let lastTvSig = "";
     let lastCtxSig = "";
+    const claimedStars = new Set<string>();
 
     const clock = new THREE.Clock();
     let elapsed = 0;
@@ -923,18 +997,33 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
         cbRef.current.onNear(nearId, nearName);
       }
 
-      // ── contextual zones (sofa / ball / tv) for the mobile action rail ──
+      // ── contextual zones (sofa / ball / tv / game rug) ──
       // Designed to grow: future mini-games just add another zone + flag.
       const ctx: ContextState = {
         nearSofa: Math.abs(me.x) < 3.8 && Math.abs(me.z - 5.5) < 2.1,
         nearBall: Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z) < 1.7,
         holdingBall: ballPhys.holderId === MY_ID,
         nearTv: Math.hypot(me.x, me.z + 9.6) < 3.8,
+        nearGame: Math.hypot(me.x, me.z - 2.2) < 3.6,
       };
-      const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}`;
+      const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}${ctx.nearGame ? 1 : 0}`;
       if (ctxSig !== lastCtxSig) {
         lastCtxSig = ctxSig;
         cbRef.current.onContext(ctx);
+      }
+
+      // ── star collect: walk over a star, server validates + scores ──
+      const gstate = st.game;
+      if (gstate.status === "playing") {
+        for (const s of gstate.stars) {
+          if (claimedStars.has(s.id)) continue;
+          if (Math.hypot(me.x - s.x, me.z - s.z) < 1.0) {
+            claimedStars.add(s.id);
+            cbRef.current.onCollect(s.id);
+          }
+        }
+      } else if (claimedStars.size) {
+        claimedStars.clear();
       }
     };
 
@@ -1036,10 +1125,32 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, on
       // ── ball mesh ──
       if (ballPhys.holderId === MY_ID || (st.ball.holderId === MY_ID && ballPhys.holderId !== MY_ID)) {
         ballPhys.holderId = st.ball.holderId ?? ballPhys.holderId;
-      }
-      ballMesh.position.set(ballPhys.x, ballPhys.y, ballPhys.z);
+      }      ballMesh.position.set(ballPhys.x, ballPhys.y, ballPhys.z);
       ballMesh.rotation.x += dt * (Math.hypot(ballPhys.vx, ballPhys.vz) * 1.6 + 0.4);
       ballMesh.rotation.z += dt * 0.5;
+
+      // ── star collectibles ──
+      const starSeen = new Set<string>();
+      if (st.game.status === "playing") {
+        for (const s of st.game.stars) {
+          starSeen.add(s.id);
+          let entry = starMeshes.get(s.id);
+          if (!entry) {
+            entry = { group: createStar(), phase: Math.random() * 6 };
+            entry.group.position.set(s.x, 0.8, s.z);
+            starMeshes.set(s.id, entry);
+            scene.add(entry.group);
+          }
+          entry.group.position.y = 0.8 + Math.sin(elapsed * 3 + entry.phase) * 0.15;
+          entry.group.rotation.y += dt * 2.5;
+        }
+      }
+      for (const [id, entry] of starMeshes) {
+        if (!starSeen.has(id)) {
+          scene.remove(entry.group);
+          starMeshes.delete(id);
+        }
+      }
 
       // ── tv refresh (title changes) ──
       const tvSig = `${st.tv.index}-${st.tv.playing}-${st.room.tv.length}`;
