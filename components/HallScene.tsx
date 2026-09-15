@@ -137,6 +137,51 @@ function posterTexture(title: string, sub: string, hue: number): THREE.CanvasTex
   return t;
 }
 
+// window view — painted ON the pane so the outside stays inside the frame
+function windowTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 480;
+  c.height = 320;
+  const g = c.getContext("2d")!;
+  const sky = g.createLinearGradient(0, 0, 0, 320);
+  sky.addColorStop(0, "#aee2ff");
+  sky.addColorStop(1, "#e8f6ff");
+  g.fillStyle = sky;
+  g.fillRect(0, 0, 480, 320);
+  // sun + halo
+  g.fillStyle = "rgba(255, 243, 176, 0.45)";
+  g.beginPath();
+  g.arc(110, 78, 62, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#fff3b0";
+  g.beginPath();
+  g.arc(110, 78, 42, 0, Math.PI * 2);
+  g.fill();
+  // clouds
+  g.fillStyle = "rgba(255,255,255,0.92)";
+  const cloud = (x: number, y: number, s: number) => {
+    g.beginPath();
+    g.arc(x, y, 22 * s, 0, Math.PI * 2);
+    g.arc(x + 24 * s, y - 8 * s, 26 * s, 0, Math.PI * 2);
+    g.arc(x + 52 * s, y, 20 * s, 0, Math.PI * 2);
+    g.fill();
+  };
+  cloud(300, 66, 1);
+  cloud(185, 128, 0.7);
+  // hills
+  g.fillStyle = "#b5e3b5";
+  g.beginPath();
+  g.ellipse(120, 345, 220, 110, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#93d193";
+  g.beginPath();
+  g.ellipse(405, 355, 200, 100, 0, 0, Math.PI * 2);
+  g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 // ─── star collectible (mini-game) ───────────────────────────────────────────
 function createStar(): THREE.Group {
   const g = new THREE.Group();
@@ -392,26 +437,27 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
     rugInner.receiveShadow = true;
     scene.add(rugInner);
 
-    // window on back wall
+    // window on back wall — kept clear of the memory-frame gallery (x ≥ -11)
     const winFrame = new THREE.Mesh(
       new THREE.BoxGeometry(3.4, 2.4, 0.16),
       new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.6 })
     );
-    winFrame.position.set(-10.5, 5.4, -12.35);
+    winFrame.position.set(-13.6, 5.4, -12.35);
     scene.add(winFrame);
-    const winGlass = new THREE.Mesh(
+    // the outside, painted on the pane — clipped by the frame by construction
+    const winView = new THREE.Mesh(
       new THREE.PlaneGeometry(3.0, 2.0),
-      new THREE.MeshBasicMaterial({ color: "#bfe3ff" })
+      new THREE.MeshBasicMaterial({ map: windowTexture() })
     );
-    winGlass.position.set(-10.5, 5.4, -12.25);
-    scene.add(winGlass);
-    const winSun = new THREE.Mesh(new THREE.CircleGeometry(0.36, 24), new THREE.MeshBasicMaterial({ color: "#fff3b0" }));
-    winSun.position.set(-11.2, 5.8, -12.24);
-    scene.add(winSun);
-    const winHill = new THREE.Mesh(new THREE.CircleGeometry(1.2, 24), new THREE.MeshBasicMaterial({ color: "#b5e3b5" }));
-    winHill.position.set(-9.9, 4.7, -12.24);
-    winHill.scale.set(1.4, 0.55, 1);
-    scene.add(winHill);
+    winView.position.set(-13.6, 5.4, -12.25);
+    scene.add(winView);
+    // crossbars sell the "window" read
+    const barMat = new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.6 });
+    const barV = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.0, 0.04), barMat);
+    barV.position.set(-13.6, 5.4, -12.23);
+    const barH = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.09, 0.04), barMat);
+    barH.position.set(-13.6, 5.4, -12.23);
+    scene.add(barV, barH);
 
     // ── sofa (all rounded, seats five) ──
     const sofa = new THREE.Group();
