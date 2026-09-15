@@ -845,8 +845,9 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     const rpsTex = new THREE.CanvasTexture(rpsCanvas);
     rpsTex.colorSpace = THREE.SRGBColorSpace;
     const boardGrp = new THREE.Group();
-    const postMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.7, 0.28), woodDark);
-    postMesh.position.y = 0.85;
+    // post ends exactly at the frame's bottom edge (y=1.35) — no overlap
+    const postMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.35, 0.28), woodDark);
+    postMesh.position.y = 0.675;
     postMesh.castShadow = true;
     const boardMesh = new THREE.Mesh(
       new THREE.BoxGeometry(2.5, 1.7, 0.16),
