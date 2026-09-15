@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🏠 Cozy Hall — a soft multiplayer place for 5–10 friends
 
-## Getting Started
+One shared 3D room, not a website. Everyone sees the same hall: wander as a
+cute rounded avatar, send emoji, poke, high-five, sit on the sofa, toss a ball,
+and watch a synced shared TV — all in real time.
 
-First, run the development server:
+## Quickstart
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # Next.js + Socket.io on http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open two browser windows (or send your LAN URL to a friend) and you will see
+each other move. No login needed in dev — you walk straight in.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Script         | What it does                                      |
+| -------------- | ------------------------------------------------- |
+| `npm run dev`  | dev server with live Socket.io sync (`server.js`) |
+| `npm run build`| production build                                  |
+| `npm run start`| production server with Socket.io                  |
+| `npm run lint` | eslint                                             |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Identity (env-toggled)
 
-## Learn More
+| Env                           | Effect                                              |
+| ----------------------------- | --------------------------------------------------- |
+| `NEXT_PUBLIC_AUTH_MODE=dev`   | nickname / quickplay (default)                      |
+| `NEXT_PUBLIC_DEV_QUICKPLAY`   | `true` → skip login, walk straight in (dev default) |
+| `NEXT_PUBLIC_AUTH_MODE=firebase` | Google Sign-in via Firebase Authentication       |
 
-To learn more about Next.js, take a look at the following resources:
+For deploys with real accounts: set `AUTH_MODE=firebase` and fill in the
+`NEXT_PUBLIC_FIREBASE_*` vars. `/admin` (code `cozy123`, see `ADMIN_CODE`)
+edits the room: name, memory frames, posters, TV playlist — all data-driven,
+no hard-coding.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Architecture
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Next.js + TypeScript + Three.js** — one environment (`app/page.tsx`).
+  All characters, furniture, and textures are procedural (no assets).
+- **Socket.io** (`server.js`) — ephemeral state: presence, movement, emotes,
+  poke / high-five, ball, TV sync. Falls back to demo bots when unreachable.
+- **Firestore** (next) — persistent room config, frames, posters, playlist.
+- **Cloudinary** (next) — actual media files; only URLs live in room data.
 
-## Deploy on Vercel
+## Controls
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+WASD / arrows to wander · space to hop · scroll to zoom · drag on mobile.
+Walk close to a friend to poke / high-five · walk over the ball to grab it.
