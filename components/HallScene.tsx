@@ -1010,6 +1010,17 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
       if (now - lastMoveSent > 66 || moving !== (lastMoveFlag === "m")) {
         lastMoveSent = now;
         lastMoveFlag = moving ? "m" : "s";
+        // carry fresh emote / action along — otherwise the next move packet
+        // wipes the bubble ~66ms after it appears (the "instant vanish" bug)
+        const self = st.players[MY_ID];
+        const freshEmote =
+          self?.emote && self?.emoteAt && Date.now() - self.emoteAt < 2600
+            ? { emote: self.emote, emoteAt: self.emoteAt }
+            : {};
+        const freshAction =
+          self?.action && self?.actionAt && Date.now() - self.actionAt < 1200
+            ? { action: self.action, actionAt: self.actionAt, actionTarget: self.actionTarget ?? null }
+            : {};
         cbRef.current.onMove({
           id: MY_ID,
           name: st.myName,
@@ -1020,6 +1031,8 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
           moving,
           sitting,
           jumping: me.y > 0.02,
+          ...freshEmote,
+          ...freshAction,
         });
       }
 
