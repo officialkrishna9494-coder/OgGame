@@ -1259,12 +1259,26 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           me.z + Math.cos(me.facing) * 0.55
         );
       } else if (renderHolder && st.players[renderHolder]) {
-        const h = st.players[renderHolder];
-        ballMesh.position.set(
-          h.x + Math.sin(h.facing) * 0.55,
-          0.85,
-          h.z + Math.cos(h.facing) * 0.55
-        );
+        // Ride the holder's INTERPOLATED rig (smoothed every frame like the
+        // character itself) — never the raw 12Hz network pos. That's what
+        // was making the carried ball judder on remote screens.
+        const rig = rigs.get(renderHolder);
+        if (rig) {
+          const fx = Math.sin(rig.group.rotation.y) * 0.55;
+          const fz = Math.cos(rig.group.rotation.y) * 0.55;
+          ballMesh.position.set(
+            rig.group.position.x + fx,
+            rig.group.position.y + 0.85,
+            rig.group.position.z + fz
+          );
+        } else {
+          const h = st.players[renderHolder];
+          ballMesh.position.set(
+            h.x + Math.sin(h.facing) * 0.55,
+            0.85,
+            h.z + Math.cos(h.facing) * 0.55
+          );
+        }
       } else {
         ballMesh.position.set(ballPhys.x, ballPhys.y, ballPhys.z);
       }
