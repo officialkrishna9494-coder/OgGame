@@ -3,6 +3,11 @@
 :root {
   --background: #f6efe6;
   --foreground: #3d3347;
+  /* notch / home-indicator insets (viewport-fit=cover) — HUD offsets add these */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
 }
 
 @theme inline {
@@ -85,8 +90,11 @@ body {
     justify-content: center;
     gap: 0.25rem;
     background: #f6efe6;
-    padding: 2rem;
+    padding: calc(var(--safe-t) + 2rem) calc(var(--safe-r) + 2rem) calc(var(--safe-b) + 2rem)
+      calc(var(--safe-l) + 2rem);
     text-align: center;
+    overflow-y: auto;
+    touch-action: manipulation;
   }
 }
 

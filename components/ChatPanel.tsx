@@ -57,7 +57,7 @@ export default function ChatPanel({ messages, cloud, compact, onSend, onClose }:
     <div
       className={`pointer-events-auto absolute z-20 flex max-h-[70dvh] flex-col overflow-hidden rounded-[24px] bg-white/92 shadow-[0_24px_70px_-18px_rgba(60,40,90,0.45)] ring-1 ring-black/[0.07] backdrop-blur ${
         compact
-          ? "bottom-2 left-1/2 w-[min(80vw,330px)] -translate-x-1/2"
+          ? "bottom-[calc(var(--safe-b)+0.5rem)] left-1/2 w-[min(80vw,330px)] -translate-x-1/2"
           : "bottom-24 left-1/2 w-[min(94vw,380px)] -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0"
       }`}
     >

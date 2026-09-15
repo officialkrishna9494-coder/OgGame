@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { BallState, ContextState, GameState, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
 import { IDLE_CONTEXT } from "../lib/hall-types";
-import { joyState } from "../lib/joy-state";
+import { joyState, resetJoy } from "../lib/joy-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 
 interface Props {
@@ -32,6 +32,13 @@ interface Props {
 }
 
 const MY_ID = "me";
+
+// camera distance range — shared by wheel, trackpad pinch and touch pinch
+const ZOOM_MIN = 14;
+const ZOOM_MAX = 27;
+// px a single canvas finger must travel before it counts as steering, so
+// the first finger of a pinch doesn't walk the character
+const TOUCH_STEER_DEAD = 10;
 
 function makeLabel(text: string): THREE.Sprite {
   const c = document.createElement("canvas");
@@ -1112,8 +1119,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     window.addEventListener("keyup", ku);
     window.addEventListener("blur", clearKeys);
 
-    // joystick (mobile) — the visible Joystick UI writes here too;
-    // canvas drag is the fallback so every touch can steer
+    // joystick (mobile) — the visible Joystick UI writes here; canvas drag
+    // is the fallback so touch screens without the stick can still steer
     const joy = joyState;
 
     const resolveCircleAABB = (px: number, pz: number, r: number, c: { x: number; z: number; hx: number; hz: number }) => {
@@ -1740,10 +1747,18 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       renderer.setSize(w, h);
     };
     window.addEventListener("resize", onResize);
-    const onWheel = (e: WheelEvent) => {
-      camDist = Math.max(14, Math.min(27, camDist + e.deltaY * 0.008));
+
+    // ── zoom: mouse wheel, trackpad pinch and touch pinch share one range ──
+    const setZoom = (d: number) => {
+      camDist = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, d));
     };
-    renderer.domElement.addEventListener("wheel", onWheel, { passive: true });
+    const onWheel = (e: WheelEvent) => {
+      // trackpad pinch arrives as ctrl+wheel: zoom the camera, not the page
+      if (e.ctrlKey) e.preventDefault();
+      const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      setZoom(camDist + px * (e.ctrlKey ? 0.04 : 0.008));
+    };
+    renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
 
     // expose toss to parent via ballPhys mutation
     const doToss = () => {
@@ -1765,38 +1780,91 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     };
     hallToss.fn = doToss;
     (mount as unknown as { __toss?: () => void }).__toss = doToss;
-    // touch joystick on canvas (left half drag = move)
-    let touchId: number | null = null;
-    let tx0 = 0;
-    let ty0 = 0;
+    // ── canvas touch: two fingers pinch to zoom; one finger drags to steer
+    // (the fallback for touch screens without the on-screen stick). A pinch
+    // owns the gesture until every finger lifts, so zooming never nudges the
+    // character, and a held on-screen stick always wins over a canvas drag. ──
+    const touches = new Map<number, { x: number; y: number }>();
+    let steerId: number | null = null;
+    let steerX0 = 0;
+    let steerY0 = 0;
+    let steering = false;
+    let pinching = false;
+    let pinchSpan0 = 1;
+    let pinchCam0 = camDist;
+    const pinchSpan = () => {
+      const [a, b] = Array.from(touches.values());
+      return Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    };
+    const beginPinch = () => {
+      pinching = true;
+      pinchSpan0 = pinchSpan();
+      pinchCam0 = camDist;
+    };
+    const stopCanvasSteer = () => {
+      steerId = null;
+      steering = false;
+      if (joy.owner === "canvas") resetJoy();
+    };
     const onTouchStart = (e: TouchEvent) => {
-      const t = e.changedTouches[0];
-      if (touchId !== null) return;
-      touchId = t.identifier;
-      tx0 = t.clientX;
-      ty0 = t.clientY;
-      joy.active = true;
+      // drop fingers whose end we never saw (element swaps, OS gestures)
+      const live = new Set(Array.from(e.touches, (t) => t.identifier));
+      for (const id of touches.keys()) if (!live.has(id)) touches.delete(id);
+      for (const t of Array.from(e.changedTouches)) touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+
+      if (touches.size >= 2) {
+        stopCanvasSteer();
+        beginPinch();
+      } else if (!pinching && steerId === null) {
+        const t = e.changedTouches[0];
+        steerId = t.identifier;
+        steerX0 = t.clientX;
+        steerY0 = t.clientY;
+      }
     };
     const onTouchMove = (e: TouchEvent) => {
       for (const t of Array.from(e.changedTouches)) {
-        if (t.identifier === touchId) {
-          joy.x = Math.max(-1, Math.min(1, (t.clientX - tx0) / 60));
-          joy.y = Math.max(-1, Math.min(1, (t.clientY - ty0) / 60));
-        }
+        if (touches.has(t.identifier)) touches.set(t.identifier, { x: t.clientX, y: t.clientY });
       }
+      if (pinching) {
+        // fingers apart → zoom in (closer camera)
+        if (touches.size >= 2) setZoom(pinchCam0 * (pinchSpan0 / pinchSpan()));
+        return;
+      }
+      const p = steerId === null ? undefined : touches.get(steerId);
+      if (!p) return;
+      if (joy.owner === "stick") {
+        steerId = null;
+        steering = false;
+        return;
+      }
+      const dx = p.x - steerX0;
+      const dy = p.y - steerY0;
+      if (!steering && Math.hypot(dx, dy) < TOUCH_STEER_DEAD) return;
+      steering = true;
+      joy.owner = "canvas";
+      joy.active = true;
+      joy.x = Math.max(-1, Math.min(1, dx / 60));
+      joy.y = Math.max(-1, Math.min(1, dy / 60));
     };
     const onTouchEnd = (e: TouchEvent) => {
       for (const t of Array.from(e.changedTouches)) {
-        if (t.identifier === touchId) {
-          touchId = null;
-          joy.x = joy.y = 0;
-          joy.active = false;
-        }
+        touches.delete(t.identifier);
+        if (t.identifier === steerId) stopCanvasSteer();
+      }
+      if (pinching) {
+        if (touches.size >= 2) beginPinch(); // re-baseline on the remaining pair
+        else if (touches.size === 0) pinching = false;
       }
     };
+    // iOS Safari pinch-zooms the whole page over HUD buttons — keep it a game
+    const blockPageZoom = (e: Event) => e.preventDefault();
     renderer.domElement.addEventListener("touchstart", onTouchStart, { passive: true });
     renderer.domElement.addEventListener("touchmove", onTouchMove, { passive: true });
     renderer.domElement.addEventListener("touchend", onTouchEnd);
+    renderer.domElement.addEventListener("touchcancel", onTouchEnd);
+    document.addEventListener("gesturestart", blockPageZoom, { passive: false });
+    document.addEventListener("gesturechange", blockPageZoom, { passive: false });
 
     animate();
 
@@ -1812,6 +1880,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       renderer.domElement.removeEventListener("touchstart", onTouchStart);
       renderer.domElement.removeEventListener("touchmove", onTouchMove);
       renderer.domElement.removeEventListener("touchend", onTouchEnd);
+      renderer.domElement.removeEventListener("touchcancel", onTouchEnd);
+      document.removeEventListener("gesturestart", blockPageZoom);
+      document.removeEventListener("gesturechange", blockPageZoom);
+      if (joy.owner === "canvas") resetJoy();
       renderer.dispose();
       mount.removeChild(renderer.domElement);
       scene.traverse((o) => {

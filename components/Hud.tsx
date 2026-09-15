@@ -2,14 +2,17 @@
 
 // ─── Cozy Hall · HUD — one environment, everything within reach ─────────────
 // Desktop: single rounded action dock along the bottom (unchanged).
-// Mobile landscape: joystick on the right, a minimal rail on the left —
-// one contextual button (sit / toss / watch, driven by where you stand)
-// plus a "⋯" bubble holding react / poke / high-five / tv.
+// Mobile landscape, console layout: floating joystick in the left thumb
+// zone; on the right, the one contextual ACT button with a "⋯" button
+// above it that opens a compact, scrollable tile menu (emojis tucked
+// behind its 😊 tile). Pinch the hall to zoom; fullscreen lives top-right.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EMOTES } from "../lib/hall-types";
 import type { ContextState, PlayerState } from "../lib/hall-types";
+import { markNudgeSeen, nudgeSeen, useFullscreen } from "../lib/fullscreen";
 import type { VoiceStatus } from "../lib/useVoice";
+import { FullscreenNudge, FullscreenToggle } from "./FullscreenControls";
 import Joystick from "./Joystick";
 
 interface Props {
@@ -97,11 +100,10 @@ function primaryAction(
 
 export default function Hud(p: Props) {
   const [emoteOpen, setEmoteOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const others = Object.entries(p.players).filter(([id]) => id !== "me");
   const count = Object.keys(p.players).length;
 
-  if (p.mobile) return <MobileHud {...p} others={others} count={count} menuOpen={menuOpen} setMenuOpen={setMenuOpen} />;
+  if (p.mobile) return <MobileHud {...p} others={others} count={count} />;
 
   const btn =
     "flex h-11 items-center justify-center gap-1.5 rounded-2xl bg-white/85 px-3.5 text-[13px] font-bold text-[#4a3f55] shadow-[0_6px_20px_-8px_rgba(90,70,110,0.4)] ring-1 ring-black/[0.06] backdrop-blur transition-all hover:bg-white active:scale-95 disabled:opacity-35 disabled:saturation-50";
@@ -276,16 +278,25 @@ export default function Hud(p: Props) {
 }
 
 // ─── mobile landscape HUD ───────────────────────────────────────────────────
-function MobileHud(
-  p: Props & {
-    others: Array<[string, PlayerState]>;
-    count: number;
-    menuOpen: boolean;
-    setMenuOpen: (v: boolean | ((x: boolean) => boolean)) => void;
-  }
-) {
+interface Tile {
+  key: string;
+  icon: string;
+  label: string;
+  run: () => void;
+  on?: boolean;
+  disabled?: boolean;
+  dot?: boolean;
+  badge?: string;
+  keepOpen?: boolean; // poke / high-five / react stay open for quick repeats
+}
+
+function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: number }) {
   const ctx = p.context;
-  const { menuOpen, setMenuOpen } = p;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [view, setView] = useState<"grid" | "emoji">("grid");
+  const clusterRef = useRef<HTMLDivElement>(null);
+  const fs = useFullscreen();
+  const [nudgeOpen, setNudgeOpen] = useState(() => !nudgeSeen());
 
   // the one universal ACT button — same priority as desktop
   const primary = primaryAction(
@@ -296,39 +307,118 @@ function MobileHud(
 
   const showBallHint = ctx && !ctx.holdingBall && ctx.nearBall;
 
-  const mini =
-    "pointer-events-auto flex items-center justify-center gap-1 rounded-2xl bg-white/90 px-3 py-2 text-[12px] font-bold text-[#4a3f55] shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-95 disabled:opacity-35";
+  const closeMenu = () => {
+    setMenuOpen(false);
+    setView("grid");
+  };
+
+  // tap anywhere outside the ACT / ⋯ cluster (hall, joystick, a panel) or
+  // press Esc to close. Capture phase: the tap still reaches its target.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (clusterRef.current?.contains(e.target as Node)) return;
+      setMenuOpen(false);
+      setView("grid");
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenuOpen(false);
+      setView("grid");
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  // ── fullscreen ──
+  const dismissNudge = () => {
+    markNudgeSeen();
+    setNudgeOpen(false);
+  };
+  const goFullscreen = () => {
+    void fs.enter(); // first: needs the tap's user activation
+    dismissNudge();
+  };
+  const onFullscreenToggle = () => {
+    if (fs.active) void fs.exit();
+    else if (fs.offer === "fullscreen") goFullscreen();
+    else if (fs.offer === "homescreen") setNudgeOpen((v) => !v); // iPhone: show how
+  };
+
+  const tiles: Tile[] = [
+    { key: "react", icon: "😊", label: "react", run: () => setView("emoji"), keepOpen: true },
+    { key: "poke", icon: "👉", label: "poke", run: p.onPoke, disabled: !p.nearName, keepOpen: true },
+    { key: "five", icon: "🙌", label: "high-5", run: p.onHighfive, disabled: !p.nearName, keepOpen: true },
+    { key: "tv", icon: "📺", label: p.tvOpen ? "hide tv" : "tv", run: p.onToggleTv, on: p.tvOpen },
+    { key: "sit", icon: "💺", label: p.sitting ? "stand" : "sit", run: p.onSit, on: p.sitting },
+    { key: "game", icon: "⭐", label: p.gameStatus === "playing" ? "playing!" : "game", run: p.onToggleGame, on: p.gameOpen },
+    { key: "rps", icon: "✊", label: "rps", run: p.onToggleRps, dot: p.rpsStatus === "picking" || p.rpsStatus === "revealing" },
+    {
+      key: "voice",
+      icon: "🎙️",
+      label: "voice",
+      run: p.onToggleVoice,
+      on: p.voiceOpen,
+      dot: p.voiceStatus === "live" && !p.voiceCount,
+      badge: p.voiceStatus === "live" && p.voiceCount ? String(p.voiceCount) : undefined,
+    },
+    {
+      key: "chat",
+      icon: "💬",
+      label: "chat",
+      run: p.onToggleChat,
+      on: p.chatOpen,
+      badge: p.unreadCount ? (p.unreadCount > 9 ? "9+" : String(p.unreadCount)) : undefined,
+    },
+  ];
+  // one glanceable signal on the closed ⋯ button
+  const menuAlert = !!p.unreadCount || p.rpsStatus === "picking" || p.rpsStatus === "revealing";
+
+  const label = "text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#a08fb5]";
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-20">
-      {/* ── compact top bar ── */}
-      <div className="absolute left-2 right-2 top-2 flex items-center justify-between gap-2">
-        <div className="pointer-events-auto flex items-center gap-2 rounded-2xl bg-white/80 py-1.5 pl-2.5 pr-3 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
+    // lifted above the bottom panels only while the menu is open, so the
+    // menu never tucks behind an open chat / tv panel
+    <div className={`pointer-events-none absolute inset-0 ${menuOpen ? "z-30" : "z-20"}`}>
+      {/* ── compact top bar (notch-safe) ── */}
+      <div className="absolute left-[calc(var(--safe-l)+0.5rem)] right-[calc(var(--safe-r)+0.5rem)] top-[calc(var(--safe-t)+0.5rem)] flex items-center justify-between gap-2">
+        <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl bg-white/80 py-1.5 pl-2.5 pr-3 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
           {p.photoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={p.photoUrl} alt="" className="h-6 w-6 rounded-lg object-cover" />
           ) : (
-            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff8fab] to-[#bdb2ff] text-xs">🏠</span>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff8fab] to-[#bdb2ff] text-xs">🏠</span>
           )}
-          <p className="text-[12px] font-extrabold text-[#3d3347]">
+          <p className="truncate text-[12px] font-extrabold text-[#3d3347]">
             {p.roomName} <span className="font-semibold text-[#8a7f98]">· {p.count}</span>
           </p>
           {p.onSignOut && (
-            <button onClick={p.onSignOut} title="sign out" className="flex h-6 w-6 items-center justify-center rounded-full bg-black/[0.05] text-[11px]">
+            <button onClick={p.onSignOut} title="sign out" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[11px]">
               ⏻
             </button>
           )}
         </div>
-        <div className="pointer-events-auto flex items-center gap-1 rounded-2xl bg-white/70 px-2 py-1.5 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
-          {p.others.slice(0, 5).map(([id, pl]) => (
-            <span key={id} title={pl.name} className="block h-5 w-5 rounded-full ring-1 ring-black/10" style={{ background: pl.color }} />
-          ))}
-          {p.simulated && <span className="pl-0.5 text-[10px]">🤖</span>}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <div className="pointer-events-auto flex h-8 items-center gap-1 rounded-2xl bg-white/70 px-2 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
+            {p.others.slice(0, 5).map(([id, pl]) => (
+              <span key={id} title={pl.name} className="block h-5 w-5 rounded-full ring-1 ring-black/10" style={{ background: pl.color }} />
+            ))}
+            {p.others.length === 0 && <span className="px-0.5 text-[10px] font-semibold text-[#8a7f98]">just you</span>}
+            {p.simulated && <span className="pl-0.5 text-[10px]">🤖</span>}
+          </div>
+          {(fs.active || fs.offer) && <FullscreenToggle active={fs.active} onClick={onFullscreenToggle} />}
         </div>
       </div>
 
-      {/* ── toasts ── */}
-      <div className="absolute left-1/2 top-12 flex w-max max-w-[86vw] -translate-x-1/2 flex-col items-center gap-1">
+      {/* ── fullscreen nudge + toasts ── */}
+      <div className="absolute left-1/2 top-[calc(var(--safe-t)+3rem)] flex w-max max-w-[min(86vw,420px)] -translate-x-1/2 flex-col items-center gap-1">
+        {nudgeOpen && fs.offer && !menuOpen && (
+          <FullscreenNudge offer={fs.offer} onGo={goFullscreen} onDismiss={dismissNudge} />
+        )}
         {p.toasts.slice(-1).map((t, i) => (
           <div key={`${t}-${i}`} className="max-w-full truncate rounded-full bg-[#3d3347]/90 px-3 py-1 text-[11px] font-semibold text-white shadow-lg">
             {t}
@@ -341,83 +431,117 @@ function MobileHud(
         )}
       </div>
 
-      {/* ── left rail: the one universal ACT button + ⋯ menu ── */}
-      <div className="absolute left-2.5 top-1/2 flex -translate-y-1/2 flex-col items-center gap-2">
-        {primary && (
-          <button
-            key={primary.key}
-            onClick={primary.run}
-            style={{ boxShadow: `0 10px 28px -8px ${primary.glow}`, borderColor: primary.glow }}
-            className="animate-pop-in pointer-events-auto flex h-[72px] w-[72px] flex-col items-center justify-center rounded-full border-2 bg-white/95 backdrop-blur transition-transform active:scale-90"
-          >
-            <span className="text-2xl leading-none">{primary.icon}</span>
-            <span className="mt-0.5 text-[10px] font-black uppercase tracking-widest text-[#3d3347]">act</span>
-            <span className="-mt-0.5 text-[8px] font-bold uppercase tracking-wide text-[#8a7f98]">{primary.label}</span>
-          </button>
-        )}
+      {/* ── joystick, left thumb zone ── */}
+      <Joystick />
 
+      {/* ── right cluster: ⋯ menu above the universal ACT button ──
+          ACT's slot is always reserved, so ⋯ never jumps when ACT pops in. */}
+      <div
+        ref={clusterRef}
+        className="absolute bottom-[calc(var(--safe-b)+3.5rem)] right-[calc(var(--safe-r)+2.25rem)] flex w-[76px] flex-col items-center gap-3"
+      >
         <button
-          onClick={() => setMenuOpen((v) => !v)}
-          title="react & social"
-          className={`pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full text-lg shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90 ${menuOpen ? "rotate-90 bg-[#3d3347] text-white" : "bg-white/90 text-[#4a3f55]"}`}
+          onClick={() => (menuOpen ? closeMenu() : setMenuOpen(true))}
+          title="actions & social"
+          aria-label={menuOpen ? "close menu" : "open menu"}
+          aria-expanded={menuOpen}
+          className={`pointer-events-auto relative flex h-12 w-12 touch-manipulation items-center justify-center rounded-full text-lg font-black shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90 ${menuOpen ? "bg-[#3d3347] text-white" : "bg-white/90 text-[#4a3f55]"}`}
         >
-          {menuOpen ? "✕" : "⋯"}
+          <span className={`transition-transform duration-200 ${menuOpen ? "rotate-90" : ""}`}>{menuOpen ? "✕" : "⋯"}</span>
+          {!menuOpen && menuAlert && (
+            <span className="absolute right-0.5 top-0.5 block h-3 w-3 rounded-full bg-[#ff3b3b] ring-2 ring-white" />
+          )}
         </button>
 
-        {/* expanding bubble: react / poke / high-five / tv / game / voice.
-            `invisible` (not just opacity-0) when closed — visibility:hidden is
-            never hit-testable, so the hidden menu can't swallow taps meant for
-            the video underneath. */}
+        <div className="relative h-[76px] w-[76px]">
+          {primary ? (
+            <button
+              key={primary.key}
+              onClick={primary.run}
+              style={{ boxShadow: `0 10px 28px -8px ${primary.glow}`, borderColor: primary.glow }}
+              className="animate-pop-in pointer-events-auto flex h-full w-full touch-manipulation flex-col items-center justify-center rounded-full border-2 bg-white/95 backdrop-blur transition-transform active:scale-90"
+            >
+              <span className="text-2xl leading-none">{primary.icon}</span>
+              <span className="mt-0.5 text-[10px] font-black uppercase tracking-widest text-[#3d3347]">act</span>
+              <span className="-mt-0.5 max-w-[64px] truncate text-[8px] font-bold uppercase tracking-wide text-[#8a7f98]">{primary.label}</span>
+            </button>
+          ) : (
+            // resting ghost: marks where contextual actions will appear
+            <span className="absolute inset-2 rounded-full border-2 border-dashed border-white/45" />
+          )}
+        </div>
+
+        {/* menu popover — opens left of the cluster, bottom-aligned, and
+            scrolls when the screen is short (browser bars, small phones).
+            `invisible` when closed: visibility:hidden is never hit-testable. */}
         <div
-          className={`absolute left-14 top-1/2 w-44 -translate-y-1/2 rounded-[20px] bg-white/95 p-2.5 shadow-2xl ring-1 ring-black/[0.08] backdrop-blur transition-all duration-200 ${menuOpen ? "visible translate-x-0 scale-100 opacity-100 pointer-events-auto" : "invisible pointer-events-none -translate-x-2 scale-95 opacity-0"}`}
+          role="menu"
+          className={`absolute bottom-0 right-[calc(100%+0.75rem)] flex max-h-[calc(100dvh-var(--safe-t)-var(--safe-b)-7.5rem)] w-[13.25rem] origin-bottom-right flex-col rounded-[20px] bg-white/95 shadow-2xl ring-1 ring-black/[0.08] backdrop-blur transition-all duration-200 ${menuOpen ? "pointer-events-auto visible translate-x-0 scale-100 opacity-100" : "pointer-events-none invisible translate-x-2 scale-95 opacity-0"}`}
         >
-          <p className="px-1 pb-1 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#a08fb5]">react</p>
-          <div className="grid grid-cols-4 gap-1">
-            {EMOTES.map((e) => (
-              <button
-                key={e}
-                onClick={() => {
-                  p.onEmote(e);
-                  setMenuOpen(false);
-                }}
-                className="flex h-9 items-center justify-center rounded-xl text-lg transition-transform hover:scale-125 active:scale-95"
-              >
-                {e}
-              </button>
-            ))}
+          {/* block (not flex) scroller: children overflow and scroll instead of squashing */}
+          <div className="min-h-0 overflow-y-auto overscroll-contain p-2 [scrollbar-width:thin]">
+            {view === "grid" ? (
+              <>
+                <p className={`truncate px-1 pb-1.5 ${label}`}>
+                  {p.nearName ? `✋ near ${p.nearName.slice(0, 12)}` : "walk up to a friend to poke"}
+                </p>
+                <div className="grid grid-cols-3 gap-1">
+                  {tiles.map((t) => (
+                    <button
+                      key={t.key}
+                      role="menuitem"
+                      disabled={t.disabled}
+                      onClick={() => {
+                        t.run();
+                        if (!t.keepOpen) closeMenu();
+                      }}
+                      className={`relative flex h-[52px] touch-manipulation flex-col items-center justify-center gap-1 rounded-2xl text-[10px] font-bold leading-none transition-all active:scale-90 disabled:opacity-35 ${t.on ? "bg-[#3d3347] text-white" : "bg-[#3d3347]/[0.05] text-[#4a3f55]"}`}
+                    >
+                      <span className="text-[19px] leading-none">{t.icon}</span>
+                      <span className="max-w-full truncate px-0.5">{t.label}</span>
+                      {t.badge ? (
+                        <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff3b3b] px-1 text-[9px] font-black text-white ring-2 ring-white">
+                          {t.badge}
+                        </span>
+                      ) : t.dot ? (
+                        <span className="absolute right-1.5 top-1.5 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white" />
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between pb-1.5">
+                  <button
+                    onClick={() => setView("grid")}
+                    className="flex h-7 touch-manipulation items-center gap-1 rounded-full bg-[#3d3347]/[0.06] pl-2 pr-2.5 text-[11px] font-bold text-[#4a3f55] active:scale-95"
+                  >
+                    ‹ back
+                  </button>
+                  <p className={`pr-1 ${label}`}>react</p>
+                </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {EMOTES.map((e) => (
+                    <button
+                      key={e}
+                      role="menuitem"
+                      aria-label={`send ${e}`}
+                      onClick={() => {
+                        p.onEmote(e);
+                        closeMenu();
+                      }}
+                      className="flex h-11 touch-manipulation items-center justify-center rounded-xl bg-[#3d3347]/[0.04] text-[22px] transition-transform active:scale-90"
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
-          <div className="mt-1.5 flex flex-col gap-1">
-            <button className={mini} onClick={p.onPoke} disabled={!p.nearName}>
-              👉 poke{p.nearName ? ` ${p.nearName.slice(0, 8)}` : ""}
-            </button>
-            <button className={mini} onClick={p.onHighfive} disabled={!p.nearName}>
-              🙌 high-five{p.nearName ? ` ${p.nearName.slice(0, 8)}` : ""}
-            </button>
-            <button className={mini} onClick={() => { p.onToggleTv(); setMenuOpen(false); }}>
-              📺 {p.tvOpen ? "hide tv" : "watch tv"}
-            </button>
-            <button className={mini} onClick={() => { p.onSit(); setMenuOpen(false); }}>
-              💺 {p.sitting ? "stand up" : "sit here"}
-            </button>
-            <button className={mini} onClick={() => { p.onToggleGame(); setMenuOpen(false); }}>
-              ⭐ {p.gameStatus === "playing" ? "scramble!" : "star game"}
-            </button>
-            <button className={mini} onClick={() => { p.onToggleRps(); setMenuOpen(false); }}>
-              ✊ {p.rpsStatus === "idle" ? "rps duel" : "rps live!"}
-            </button>
-            <button className={mini} onClick={() => { p.onToggleVoice(); setMenuOpen(false); }}>
-              🎙️ {p.voiceStatus === "live" ? `voice · ${p.voiceCount ?? ""}` : "voice chat"}
-            </button>
-            <button className={mini} onClick={() => { p.onToggleChat(); setMenuOpen(false); }}>
-              💬 chat{p.unreadCount ? ` · ${p.unreadCount} new` : ""}
-            </button>
-          </div>
-          {!p.nearName && <p className="px-1 pt-1 text-[10px] font-medium text-[#a99cbb]">walk up to a friend to poke ✋</p>}
         </div>
       </div>
-
-      {/* ── joystick, right ── */}
-      <Joystick />
     </div>
   );
 }

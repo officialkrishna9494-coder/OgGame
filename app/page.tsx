@@ -159,7 +159,7 @@ function HallClient({ me }: { me: Identity }) {
   const sitting = players["me"]?.sitting ?? false;
 
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-[#f6efe6] font-[var(--font-geist-sans),system-ui,sans-serif]">
+    <main className="relative h-dvh w-full touch-manipulation overflow-hidden bg-[#f6efe6] font-[var(--font-geist-sans),system-ui,sans-serif]">
       <HallScene
         myName={me.name}
         myColor={me.color}
