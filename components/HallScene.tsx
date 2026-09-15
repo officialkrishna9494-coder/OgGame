@@ -310,7 +310,7 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
     renderer.setSize(W, H);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     mount.appendChild(renderer.domElement);
@@ -810,8 +810,7 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
     let lastCtxSig = "";
     const claimedStars = new Set<string>();
 
-    const clock = new THREE.Clock();
-    let elapsed = 0;
+    const timer = new THREE.Timer();
     let dead = false;
     // smoothed look target — the camera gazes at this, never at the raw
     // player position, so footsteps can't shake the frame.
@@ -1033,8 +1032,9 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
       // Variable timestep (clamped): physics + camera advance once per
       // displayed frame, so motion stays butter-smooth on 60Hz and 120Hz+
       // screens alike — no fixed-step quantization judder.
-      const dt = Math.min(Math.max(clock.getDelta(), 0.0005), 1 / 30);
-      elapsed += dt;
+      timer.update();
+      const dt = Math.min(Math.max(timer.getDelta(), 0.0005), 1 / 30);
+      const elapsed = timer.getElapsed();
       step(dt);
 
       const st = stateRef.current;

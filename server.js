@@ -12,7 +12,6 @@
 //   Socket.io  → presence, movement, emotes, poke/high-five, ball, TV sync (ephemeral)
 
 const { createServer } = require("http");
-const { parse } = require("url");
 const next = require("next");
 const { Server } = require("socket.io");
 
@@ -84,8 +83,9 @@ function broadcast(io) {
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
-    const parsed = parse(req.url, true);
-    handle(req, res, parsed);
+    // WHATWG URL (legacy url.parse() is deprecated) shaped for Next's handler.
+    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    handle(req, res, { pathname: url.pathname, query: Object.fromEntries(url.searchParams) });
   });
 
   const io = new Server(server, {
