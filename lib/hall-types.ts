@@ -82,6 +82,9 @@ export interface RoomConfig {
   posters: Poster[];
   tv: TvVideo[];
   maxPlayers: number;
+  // last-writer-wins stamp (ms). Snapshots older than our latest local
+  // write are ignored so a stale cloud doc can never wipe fresh edits.
+  updatedAt?: number;
 }
 
 export type HallEvent =

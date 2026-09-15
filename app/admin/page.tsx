@@ -8,7 +8,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { DEFAULT_ROOM, NEXT_FRAME_SLOT } from "../../lib/room-defaults";
-import { loadRoom, saveRoom } from "../../lib/room-store";
+import { loadRoom, saveRoom, stampRoom } from "../../lib/room-store";
 import { AUTH_MODE } from "../../lib/auth";
 import { dbConfigured } from "../../lib/db";
 import { cloudinaryConfigured, uploadImage } from "../../lib/media";
@@ -26,6 +26,7 @@ export default function AdminPage() {
   const [unlocked, setUnlocked] = useState(false);
   const [code, setCode] = useState("");
   const [room, setRoom] = useState<RoomConfig | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const unlock = () => {
     if (code.trim() === PASSCODE) {
@@ -38,11 +39,18 @@ export default function AdminPage() {
 
   const patch = (p: Partial<RoomConfig>) => {
     if (!room) return;
-    const next = { ...room, ...p };
+    const next = stampRoom({ ...room, ...p });
     setRoom(next);
     saveRoom(next);
     if (dbConfigured()) {
-      import("../../lib/db").then((m) => m.saveRoomCloud(next).catch(() => {}));
+      import("../../lib/db")
+        .then((m) => m.saveRoomCloud(next))
+        .then(() => setSaveError(null))
+        .catch(() =>
+          setSaveError(
+            "Couldn't save to Firestore — check the database Rules and that you're signed in. Changes are kept on this device only for now."
+          )
+        );
     }
   };
 
@@ -89,6 +97,12 @@ export default function AdminPage() {
             ← hall
           </Link>
         </div>
+
+        {saveError && (
+          <p className="mt-3 rounded-2xl bg-[#ffe4e4] px-4 py-2.5 text-[12px] font-semibold leading-relaxed text-[#b03939]">
+            ⚠️ {saveError}
+          </p>
+        )}
 
         {/* backend status */}
         <section className="mt-4 flex flex-wrap gap-2">
