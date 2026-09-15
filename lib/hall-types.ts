@@ -28,6 +28,9 @@ export interface PlayerState {
   actionTarget?: string | null;
   // dodgeball bonk: victim flashes red + does a stunt while fresh
   hitAt?: number;
+  // chat bubble: shown over the head for ~5s, even with chat closed
+  chat?: string;
+  chatAt?: number;
 }
 
 export interface BallState {
@@ -121,6 +124,7 @@ export interface ContextState {
   nearTv: boolean;
   nearGame: boolean;
   nearRps: boolean;
+  nearEmergency: boolean;
 }
 
 export const IDLE_CONTEXT: ContextState = {
@@ -130,6 +134,7 @@ export const IDLE_CONTEXT: ContextState = {
   nearTv: false,
   nearGame: false,
   nearRps: false,
+  nearEmergency: false,
 };
 
 // ─── Star Scramble (mini-game nº 1 — intentionally tiny) ────────────────────
@@ -221,3 +226,24 @@ export const RPS_REVEAL_MS = 3_500;
 
 // RPS table spot — back-left, by the window end
 export const RPS_TABLE = { x: -10, z: -6.5 };
+
+// ─── Emergency signal ───────────────────────────────────────────────────────
+// One red button by the TV. Raising it flashes every screen red + pops a
+// dialog naming the raiser. Global 10s cooldown, auto-clears after ~3.5s.
+export interface SosState {
+  by: string;
+  name: string;
+  at: number;
+}
+
+// ─── Persistent chat ────────────────────────────────────────────────────────
+export interface ChatMsg {
+  id: string;
+  name: string;
+  color: string;
+  text: string;
+  at: number;
+}
+
+export const CHAT_BUBBLE_MS = 5_000;
+export const CHAT_MAX_LEN = 140;

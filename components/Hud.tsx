@@ -27,6 +27,8 @@ interface Props {
   gameStatus?: string;
   gameOpen?: boolean;
   rpsStatus?: string;
+  unreadCount?: number;
+  chatOpen?: boolean;
   voiceStatus?: VoiceStatus;
   voiceOpen?: boolean;
   voiceCount?: number;
@@ -42,13 +44,15 @@ interface Props {
   onToggleVoice: () => void;
   onToggleRps: () => void;
   onRpsAct: () => void;
+  onToggleChat: () => void;
+  onSos: () => void;
   onOpenAddLink: () => void;
 }
 
 // ─── the one universal ACT button ───────────────────────────────────────────
-// Same priority everywhere: toss (holding) → add link (near TV) → duel
-// (at the RPS table) → play (on the rug, star game idle) → sofa sit/stand.
-// Everything else lives in menus.
+// Same priority everywhere: SOS alarm → toss (holding) → add link (near TV)
+// → duel (at the RPS table) → play (on the rug, star game idle) → sofa
+// sit/stand. Everything else lives in menus.
 interface PrimaryAction {
   key: string;
   icon: string;
@@ -61,6 +65,7 @@ function primaryAction(
   ctx: ContextState | undefined,
   flags: { sitting: boolean; gameStatus?: string },
   h: {
+    onSos: () => void;
     onToss: () => void;
     onOpenAddLink: () => void;
     onRpsAct: () => void;
@@ -69,6 +74,8 @@ function primaryAction(
   }
 ): PrimaryAction | null {
   if (!ctx) return null;
+  if (ctx.nearEmergency)
+    return { key: "sos", icon: "🚨", label: "sos", glow: "#ff3b3b", run: h.onSos };
   if (ctx.holdingBall)
     return { key: "toss", icon: "⚽", label: "toss", glow: "#ff6b6b", run: h.onToss };
   if (ctx.nearTv)
@@ -102,7 +109,7 @@ export default function Hud(p: Props) {
   const primary = primaryAction(
     p.context,
     { sitting: p.sitting, gameStatus: p.gameStatus },
-    { onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onRpsAct: p.onRpsAct, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
+    { onSos: p.onSos, onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onRpsAct: p.onRpsAct, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
   );
 
   return (
@@ -244,6 +251,21 @@ export default function Hud(p: Props) {
           >
             📺 {p.tvOpen ? "hide" : "tv"}
           </button>
+          <button
+            className={`${btn} ${p.chatOpen ? "!bg-[#3d3347] !text-white" : ""}`}
+            onClick={p.onToggleChat}
+            title="hall chat"
+          >
+            <span className="relative text-base">
+              💬
+              {p.unreadCount ? (
+                <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff3b3b] px-1 text-[9px] font-black text-white ring-2 ring-white">
+                  {p.unreadCount > 9 ? "9+" : p.unreadCount}
+                </span>
+              ) : null}
+            </span>{" "}
+            chat
+          </button>
         </div>
         <p className="max-w-[92vw] truncate text-[11px] font-medium text-[#3d3347]/50">
           {p.tvTitle ? `on the tv · ${p.tvTitle}` : "walk over the ball to pick it up · sit faces the tv"}
@@ -269,7 +291,7 @@ function MobileHud(
   const primary = primaryAction(
     ctx,
     { sitting: p.sitting, gameStatus: p.gameStatus },
-    { onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onRpsAct: p.onRpsAct, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
+    { onSos: p.onSos, onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onRpsAct: p.onRpsAct, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
   );
 
   const showBallHint = ctx && !ctx.holdingBall && ctx.nearBall;
@@ -385,6 +407,9 @@ function MobileHud(
             </button>
             <button className={mini} onClick={() => { p.onToggleVoice(); setMenuOpen(false); }}>
               🎙️ {p.voiceStatus === "live" ? `voice · ${p.voiceCount ?? ""}` : "voice chat"}
+            </button>
+            <button className={mini} onClick={() => { p.onToggleChat(); setMenuOpen(false); }}>
+              💬 chat{p.unreadCount ? ` · ${p.unreadCount} new` : ""}
             </button>
           </div>
           {!p.nearName && <p className="px-1 pt-1 text-[10px] font-medium text-[#a99cbb]">walk up to a friend to poke ✋</p>}

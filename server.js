@@ -77,8 +77,17 @@ function endGame(io) {
 }
 
 function snapshot() {
-  return { players: Object.fromEntries(players), ball, tv, game, rps };
+  return { players: Object.fromEntries(players), ball, tv, game, rps, sos };
 }
+
+// ─── Emergency signal: one red button, global 10s cooldown, ~3.5s alarm ────
+let sos = null;
+let lastSosAt = 0;
+const SOS_COOLDOWN_MS = 10_000;
+const SOS_ALARM_MS = 3_500;
+
+// ─── chat bubble relay (history persists in Firestore, client-side) ─────────
+const lastChatAt = new Map(); // socketId -> ts
 
 // ─── Rock-Paper-Scissors arena — server referees best-of-5 (first to 3) ────
 const RPS_WIN = 3;
@@ -203,6 +212,11 @@ app.prepare().then(() => {
       rpsReset();
       dirty = true;
     }
+    // SOS expiry
+    if (sos && Date.now() - sos.at > SOS_ALARM_MS) {
+      sos = null;
+      dirty = true;
+    }
   }, 500);
 
   io.on("connection", (socket) => {
@@ -247,6 +261,8 @@ app.prepare().then(() => {
         actionAt: players.get(socket.id)?.actionAt,
         actionTarget: players.get(socket.id)?.actionTarget ?? null,
         hitAt: players.get(socket.id)?.hitAt,
+        chat: players.get(socket.id)?.chat,
+        chatAt: players.get(socket.id)?.chatAt,
         seat: typeof p.seat === "number" ? p.seat : null,
         seatMode: p.seatMode === "sofa" ? "sofa" : null,
       });
@@ -304,6 +320,30 @@ app.prepare().then(() => {
         "hall:toast",
         thrower && freshThrow ? `💥 ${thrower.name} bonked ${cur.name}!` : `💥 ${cur.name} got bonked!`
       );
+      dirty = true;
+    });
+
+    // chat bubble — instant overhead text for everyone (history is Firestore's job)
+    socket.on("hall:chat", ({ text } = {}) => {
+      const cur = players.get(socket.id);
+      if (!cur) return;
+      const now = Date.now();
+      if (now - (lastChatAt.get(socket.id) ?? 0) < 1500) return;
+      const clean = String(text ?? "").trim().slice(0, 140);
+      if (!clean) return;
+      lastChatAt.set(socket.id, now);
+      players.set(socket.id, { ...cur, chat: clean, chatAt: now });
+      dirty = true;
+    });
+
+    // emergency signal — global cooldown, everyone gets the alarm
+    socket.on("sos:raise", () => {
+      const now = Date.now();
+      if (now - lastSosAt < SOS_COOLDOWN_MS) return;
+      const m = meta.get(socket.id);
+      lastSosAt = now;
+      sos = { by: socket.id, name: m?.name ?? "Someone", at: now };
+      io.to("hall").emit("hall:toast", `🚨 ${sos.name} raised an EMERGENCY signal!`);
       dirty = true;
     });
 

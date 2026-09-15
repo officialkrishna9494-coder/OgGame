@@ -104,6 +104,7 @@ export const COLLIDERS = [
   { x: 4.2, z: 1.6, hx: 0.8, hz: 0.8 }, // floor cushion
   { x: -10, z: -6.5, hx: 1.3, hz: 1.0 }, // RPS table
   { x: -12.9, z: -6.5, hx: 1.3, hz: 0.35 }, // RPS scoreboard
+  { x: 5.0, z: -10.0, hx: 0.5, hz: 0.5 }, // emergency button pedestal
 ];
 
 export const HALL_BOUNDS = { x: 14.6, zMin: -11.4, zMax: 11.2 };

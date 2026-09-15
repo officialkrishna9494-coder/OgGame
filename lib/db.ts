@@ -4,10 +4,12 @@
 // Every function degrades gracefully — without Firebase env vars the hall is
 // 100% local and nothing throws.
 
-import type { RoomConfig } from "./hall-types";
+import type { ChatMsg, RoomConfig } from "./hall-types";
 import { firebaseConfigured } from "./auth";
 
 export const ROOM_DOC = "cozy-hall";
+export const CHAT_KEEP = 100;
+export const CHAT_PAGE = 50;
 
 export function dbConfigured(): boolean {
   return firebaseConfigured();
@@ -67,4 +69,57 @@ export async function saveUserProfile(profile: {
     },
     { merge: true }
   );
+}
+
+// ─── chat: rooms/cozy-hall/messages (Firestore rules must allow — see README)
+export async function watchMessages(cb: (msgs: ChatMsg[]) => void): Promise<() => void> {
+  const [{ collection, query, orderBy, limit, onSnapshot }, db] = await Promise.all([
+    import("firebase/firestore"),
+    getDb(),
+  ]);
+  const q = query(
+    collection(db, "rooms", ROOM_DOC, "messages"),
+    orderBy("createdAt", "desc"),
+    limit(CHAT_PAGE)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const msgs = snap.docs
+        .map((d) => {
+          const data = d.data() as { name?: string; color?: string; text?: string; createdAt?: { toMillis?: () => number } };
+          return {
+            id: d.id,
+            name: String(data.name ?? "Friend").slice(0, 14),
+            color: String(data.color ?? "#bdb2ff"),
+            text: String(data.text ?? "").slice(0, 140),
+            at: data.createdAt?.toMillis?.() ?? Date.now(),
+          } as ChatMsg;
+        })
+        .reverse();
+      cb(msgs);
+    },
+    () => cb([])
+  );
+}
+
+export async function sendMessage(m: { name: string; color: string; text: string }): Promise<void> {
+  const [{ collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs, deleteDoc }, db] =
+    await Promise.all([import("firebase/firestore"), getDb()]);
+  const col = collection(db, "rooms", ROOM_DOC, "messages");
+  await addDoc(col, {
+    name: m.name.slice(0, 14),
+    color: m.color,
+    text: m.text.slice(0, 140),
+    createdAt: serverTimestamp(),
+  });
+  // light trim so history can't grow unbounded
+  try {
+    const snap = await getDocs(query(col, orderBy("createdAt", "desc"), limit(CHAT_KEEP + 1)));
+    if (snap.size > CHAT_KEEP) {
+      await Promise.all(snap.docs.slice(CHAT_KEEP).map((d) => deleteDoc(d.ref)));
+    }
+  } catch {
+    /* trim is best-effort */
+  }
 }

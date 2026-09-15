@@ -9,19 +9,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import AuthGate from "../components/AuthGate";
 import AddLinkPanel from "../components/AddLinkPanel";
+import ChatPanel from "../components/ChatPanel";
 import GamePanel from "../components/GamePanel";
 import RpsPanel from "../components/RpsPanel";
+import SosAlert from "../components/SosAlert";
 import Hud from "../components/Hud";
 import RotatePrompt from "../components/RotatePrompt";
 import TvPanel from "../components/TvPanel";
 import VoicePanel from "../components/VoicePanel";
 import { hallToss } from "../components/HallScene";
 import { useRoom } from "../lib/room-store";
+import { useChat } from "../lib/useChat";
 import { useHallSocket } from "../lib/useHallSocket";
 import { useMobileLandscape } from "../lib/useMobileLandscape";
 import { useVoice } from "../lib/useVoice";
 import { dbConfigured } from "../lib/db";
-import { popSfx, startSfx, winSfx } from "../lib/sfx";
+import { popSfx, sosSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
 import { IDLE_CONTEXT, type BallState, type ContextState, type PlayerState } from "../lib/hall-types";
 import { stampRoom } from "../lib/room-store";
@@ -35,6 +38,9 @@ function HallClient({ me }: { me: Identity }) {
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [rpsOpen, setRpsOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatSeenAt, setChatSeenAt] = useState(() => Date.now());
+  const [sosDismissedAt, setSosDismissedAt] = useState(0);
   const [nearId, setNearId] = useState<string | null>(null);
   const [nearName, setNearName] = useState<string | null>(null);
   const [context, setContext] = useState<ContextState>(IDLE_CONTEXT);
@@ -42,7 +48,9 @@ function HallClient({ me }: { me: Identity }) {
   const voice = useVoice(me);
 
   const socket = useHallSocket(me);
-  const { players, ball, tv, game, rps, toasts, simulated, mySocketId } = socket.snapshot;
+  const { players, ball, tv, game, rps, sos, toasts, simulated, mySocketId } = socket.snapshot;
+  const chat = useChat();
+  const unreadCount = chat.messages.filter((m) => m.at > chatSeenAt && m.name !== me.name).length;
 
   // persist Google profiles to Firestore `users/{uid}` (no-op without config)
   useEffect(() => {
@@ -82,6 +90,18 @@ function HallClient({ me }: { me: Identity }) {
     }
   }, [rps]);
 
+  // SOS overlay: pure render gate (SosAlert self-dismisses after 3s).
+  // Shows while the alarm is fresh and not manually stood down.
+  const showSos = !!sos && sosDismissedAt < sos.at;
+  // SOS siren on every fresh alarm
+  const lastSosAt = useRef(0);
+  useEffect(() => {
+    if (sos && sos.at > lastSosAt.current) {
+      lastSosAt.current = sos.at;
+      sosSfx();
+    }
+  }, [sos]);
+
   const tvPlaylist = useMemo(
     () => (tv.playlist.length ? tv.playlist : room.tv),
     [tv.playlist, room.tv]
@@ -98,6 +118,19 @@ function HallClient({ me }: { me: Identity }) {
   const handleCollect = useCallback((starId: string) => socket.collectStar(starId), [socket]);
   const handleHit = useCallback(() => socket.sendHit(), [socket]);
   const handleSofaSit = useCallback(() => socket.sendAction("sit", null, { seatMode: "sofa" }), [socket]);
+  const handleSos = useCallback(() => socket.raiseSos(), [socket]);
+  const toggleChat = useCallback(() => {
+    setChatOpen((v) => !v);
+    setChatSeenAt(Date.now());
+  }, []);
+  // persist first (throws when offline/unsigned), bubble overhead on success
+  const handleChatSend = useCallback(
+    async (text: string) => {
+      await chat.send({ name: me.name, color: me.color, text });
+      socket.sendChat(text);
+    },
+    [chat, socket, me.name, me.color]
+  );
   // ACT at the RPS table: idle → throw a challenge + open the panel,
   // otherwise just open the panel (join / pick / spectate from there).
   const handleRpsAct = useCallback(() => {
@@ -137,6 +170,7 @@ function HallClient({ me }: { me: Identity }) {
         tv={{ ...tv, playlist: tvPlaylist }}
         game={game}
         rps={rps}
+        sos={sos}
         onMove={handleMove}
         onBall={handleBall}
         onNear={handleNear}
@@ -163,6 +197,8 @@ function HallClient({ me }: { me: Identity }) {
         gameStatus={game.status}
         gameOpen={gameOpen}
         rpsStatus={rps.status}
+        unreadCount={unreadCount || undefined}
+        chatOpen={chatOpen}
         voiceStatus={voice.status}
         voiceOpen={voiceOpen}
         voiceCount={voice.peers.length || undefined}
@@ -178,6 +214,8 @@ function HallClient({ me }: { me: Identity }) {
         onToggleVoice={() => setVoiceOpen((v) => !v)}
         onToggleRps={() => setRpsOpen((v) => !v)}
         onRpsAct={handleRpsAct}
+        onToggleChat={toggleChat}
+        onSos={handleSos}
         onOpenAddLink={() => setLinkOpen(true)}
       />
 
@@ -200,6 +238,20 @@ function HallClient({ me }: { me: Identity }) {
       {voiceOpen && <VoicePanel voice={voice} compact={mobile} onClose={() => setVoiceOpen(false)} />}
 
       {linkOpen && <AddLinkPanel onAdd={handleAddVideo} onClose={() => setLinkOpen(false)} />}
+
+      {chatOpen && (
+        <ChatPanel
+          messages={chat.messages}
+          cloud={chat.live}
+          compact={mobile}
+          onSend={handleChatSend}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
+
+      {showSos && sos && (
+        <SosAlert key={sos.at} name={sos.name} onClose={() => setSosDismissedAt(Date.now())} />
+      )}
 
       {tvOpen && (
         <TvPanel

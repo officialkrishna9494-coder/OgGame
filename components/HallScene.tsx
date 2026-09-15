@@ -7,7 +7,7 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { BallState, ContextState, GameState, PlayerState, RoomConfig, RpsState, TvState } from "../lib/hall-types";
+import type { BallState, ContextState, GameState, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
 import { IDLE_CONTEXT } from "../lib/hall-types";
 import { joyState } from "../lib/joy-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
@@ -22,6 +22,7 @@ interface Props {
   tv: TvState;
   game: GameState;
   rps: RpsState;
+  sos: SosState | null;
   onMove: (p: PlayerState) => void;
   onBall: (b: BallState) => void;
   onNear: (nearId: string | null, nearName: string | null) => void;
@@ -60,8 +61,59 @@ function makeLabel(text: string): THREE.Sprite {
   return sp;
 }
 
-function makeEmoteSprite(emoji: string): THREE.Sprite {
+// chat bubble — big dark pill with up to 2 wrapped lines (readable at distance)
+function makeChatBubble(text: string): THREE.Sprite {
   const c = document.createElement("canvas");
+  c.width = 560;
+  c.height = 184;
+  const g = c.getContext("2d")!;
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let line = "";
+  for (const w of words) {
+    if ((line + " " + w).trim().length > 24) {
+      lines.push(line.trim());
+      line = w;
+      if (lines.length === 2) break;
+    } else {
+      line += (line ? " " : "") + w;
+    }
+  }
+  if (lines.length < 2 && line.trim()) lines.push(line.trim());
+  if (words.join(" ").length > lines.join(" ").length + 1) {
+    lines[lines.length - 1] += "…";
+  }
+  const h = lines.length > 1 ? 156 : 108;
+  const y0 = (184 - h) / 2;
+  g.fillStyle = "rgba(45, 36, 54, 0.95)";
+  g.strokeStyle = "rgba(255,255,255,0.35)";
+  g.lineWidth = 3;
+  g.beginPath();
+  g.roundRect(8, y0, 544, h, 44);
+  g.fill();
+  g.stroke();
+  // tail
+  g.beginPath();
+  g.moveTo(248, y0 + h - 4);
+  g.lineTo(280, y0 + h + 28);
+  g.lineTo(312, y0 + h - 4);
+  g.closePath();
+  g.fill();
+  g.fillStyle = "#ffffff";
+  g.font = "700 37px ui-rounded, system-ui, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  lines.forEach((l, i) => g.fillText(l.slice(0, 28), 280, y0 + h / 2 + (i - (lines.length - 1) / 2) * 46));
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
+  );
+  sp.scale.set(2.9, 0.95, 1);
+  return sp;
+}
+
+function makeEmoteSprite(emoji: string): THREE.Sprite {  const c = document.createElement("canvas");
   c.width = 128;
   c.height = 128;
   const g = c.getContext("2d")!;
@@ -230,6 +282,8 @@ interface AvatarRig {
   label: THREE.Sprite;
   emote: THREE.Sprite | null;
   emoteUntil: number;
+  chat: THREE.Sprite | null;
+  chatText: string;
   ring: THREE.Mesh;
   walkPhase: number;
   // dodgeball: true while the red-flash stunt is showing (skips recolor)
@@ -338,7 +392,7 @@ function createAvatar(color: string, name: string): AvatarRig {  const group = n
   ring.position.y = 0.06;
   group.add(ring);
 
-  return { group, body, head, armL, armR, footL, footR, label, emote: null, emoteUntil: 0, ring, walkPhase: Math.random() * 6, wasHit: false };
+  return { group, body, head, armL, armR, footL, footR, label, emote: null, emoteUntil: 0, chat: null, chatText: "", ring, walkPhase: Math.random() * 6, wasHit: false };
 }
 
 // shortest-path angle lerp (stops the sit-down 360° spin)
@@ -351,14 +405,14 @@ function lerpAngle(a: number, b: number, t: number): number {
 
 export const hallToss: { fn: null | (() => void) } = { fn: null };
 
-export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, rps, onMove, onBall, onNear, onContext, onCollect, onHit }: Props) {
+export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, rps, sos, onMove, onBall, onNear, onContext, onCollect, onHit }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ players, ball, room, tv, game, rps, myName, myColor, mySocketId });
+  const stateRef = useRef({ players, ball, room, tv, game, rps, sos, myName, myColor, mySocketId });
   const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect, onHit });
 
   // keep the long-lived Three.js loop fed with fresh props without re-creating it
   useEffect(() => {
-    stateRef.current = { players, ball, room, tv, game, rps, myName, myColor, mySocketId };
+    stateRef.current = { players, ball, room, tv, game, rps, sos, myName, myColor, mySocketId };
     cbRef.current = { onMove, onBall, onNear, onContext, onCollect, onHit };
   });
 
@@ -949,6 +1003,45 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     };
     drawRps();
 
+    // ── emergency button (right of the TV) ───────────────────────────────
+    const sosGrp = new THREE.Group();
+    const sosBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45, 0.52, 0.16, 20),
+      new THREE.MeshStandardMaterial({ color: "#3d3347", roughness: 0.6 })
+    );
+    sosBase.position.y = 0.08;
+    sosBase.castShadow = true;
+    const sosPost = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 1.0, 0.3),
+      new THREE.MeshStandardMaterial({ color: "#6b6478", roughness: 0.6 })
+    );
+    sosPost.position.y = 0.65;
+    sosPost.castShadow = true;
+    const sosDomeMat = new THREE.MeshStandardMaterial({
+      color: "#ff3b3b",
+      emissive: "#ff1f1f",
+      emissiveIntensity: 0.7,
+      roughness: 0.3,
+    });
+    const sosDome = new THREE.Mesh(new THREE.SphereGeometry(0.3, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), sosDomeMat);
+    sosDome.position.y = 1.15;
+    sosDome.castShadow = true;
+    const sosCollar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.36, 0.36, 0.1, 20),
+      new THREE.MeshStandardMaterial({ color: "#fff6ea", roughness: 0.5 })
+    );
+    sosCollar.position.y = 1.15;
+    sosGrp.add(sosBase, sosPost, sosDome, sosCollar);
+    const sosTag = makeLabel("SOS");
+    sosTag.position.y = 1.95;
+    sosTag.scale.set(1.1, 0.34, 1);
+    sosGrp.add(sosTag);
+    sosGrp.position.set(5.0, 0, -10.0);
+    scene.add(sosGrp);
+    const sosLight = new THREE.PointLight("#ff3b3b", 3, 10, 2);
+    sosLight.position.set(5.0, 2.4, -10.0);
+    scene.add(sosLight);
+
     // ball
     const ballMesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.28, 24, 18),
@@ -991,21 +1084,33 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       sitting: false,
     };
     const keys = new Set<string>();
+    // typing in chat / admin inputs must never steer the character.
+    // keyup always releases (no stuck keys); keydown is ignored while typing.
+    const isTypingTarget = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+    };
     const onKey = (down: boolean) => (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
+      if (!down) {
+        keys.delete(k);
+        return;
+      }
+      if (isTypingTarget(e)) return;
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k) || ["w", "a", "s", "d"].includes(k)) {
         e.preventDefault();
       }
-      if (down) keys.add(k);
-      else keys.delete(k);
-      if (down && k === " ") {
+      keys.add(k);
+      if (k === " ") {
         if (me.y < 0.01 && !me.sitting) me.vy = 5.2;
       }
     };
     const kd = onKey(true);
     const ku = onKey(false);
+    const clearKeys = () => keys.clear();
     window.addEventListener("keydown", kd);
     window.addEventListener("keyup", ku);
+    window.addEventListener("blur", clearKeys);
 
     // joystick (mobile) — the visible Joystick UI writes here too;
     // canvas drag is the fallback so every touch can steer
@@ -1267,6 +1372,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
             ? { action: self.action, actionAt: self.actionAt, actionTarget: self.actionTarget ?? null }
             : {};
         const freshHit = selfHitAt !== 0 && Date.now() - selfHitAt < 2000 ? { hitAt: selfHitAt } : {};
+        const freshChat =
+          self?.chat && self?.chatAt && Date.now() - self.chatAt < 5000
+            ? { chat: self.chat, chatAt: self.chatAt }
+            : {};
         cbRef.current.onMove({
           id: MY_ID,
           name: st.myName,
@@ -1282,6 +1391,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           ...freshEmote,
           ...freshAction,
           ...freshHit,
+          ...freshChat,
         });
       }
 
@@ -1319,6 +1429,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       const nearTv = lastCtx.nearTv ? dTv < 4.3 : dTv < 3.6;
       const dRps = Math.hypot(me.x + 10, me.z + 6.5);
       const nearRps = lastCtx.nearRps ? dRps < 3.4 : dRps < 2.8;
+      const dSos = Math.hypot(me.x - 5.0, me.z + 10.0);
+      const nearEmergency = lastCtx.nearEmergency ? dSos < 3.0 : dSos < 2.4;
       const dBall = Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z);
       const nearBall = lastCtx.nearBall ? dBall < 2.0 : dBall < 1.5;
       const ctx: ContextState = {
@@ -1328,9 +1440,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         nearTv,
         nearGame,
         nearRps,
+        nearEmergency,
       };
       lastCtx = ctx;
-      const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}${ctx.nearGame ? 1 : 0}${ctx.nearRps ? 1 : 0}`;
+      const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}${ctx.nearGame ? 1 : 0}${ctx.nearRps ? 1 : 0}${ctx.nearEmergency ? 1 : 0}`;
       if (ctxSig !== lastCtxSig) {
         lastCtxSig = ctxSig;
         cbRef.current.onContext(ctx);
@@ -1406,6 +1519,29 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         rig.footL.position.z += ((0.3 * sitK + 0.06) - rig.footL.position.z) * Math.min(1, dt * 8);
         rig.footR.position.z += ((0.3 * sitK + 0.06) - rig.footR.position.z) * Math.min(1, dt * 8);
 
+        // chat bubble — overhead text for ~5s, even with chat closed.
+        // The emoji rides above it when both show at once.
+        const chatFresh = p.chat && p.chatAt && Date.now() - p.chatAt < 5000;
+        if (chatFresh && p.chat) {
+          if (!rig.chat || rig.chatText !== p.chat) {
+            if (rig.chat) {
+              g.remove(rig.chat);
+              rig.chat.material.map?.dispose();
+              rig.chat.material.dispose();
+            }
+            rig.chat = makeChatBubble(p.chat);
+            rig.chatText = p.chat;
+            g.add(rig.chat);
+          }
+          rig.chat.position.y = 2.62 + Math.sin(elapsed * 2.4) * 0.04;
+        } else if (rig.chat) {
+          g.remove(rig.chat);
+          rig.chat.material.map?.dispose();
+          rig.chat.material.dispose();
+          rig.chat = null;
+          rig.chatText = "";
+        }
+
         // emote bubble
         if (p.emote && p.emoteAt && Date.now() - p.emoteAt < 2600) {
           if (!rig.emote || rig.emoteUntil < Date.now() - 2600) {
@@ -1415,13 +1551,12 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
               rig.emote.material.dispose();
             }
             rig.emote = makeEmoteSprite(p.emote);
-            rig.emote.position.y = 2.55;
             g.add(rig.emote);
             rig.emoteUntil = Date.now();
           }
           const pop = 1 + Math.sin(Math.min(1, (Date.now() - p.emoteAt) / 300) * Math.PI) * 0.25;
           rig.emote.scale.set(0.9 * pop, 0.9 * pop, 1);
-          rig.emote.position.y = 2.55 + Math.sin(elapsed * 3) * 0.05;
+          rig.emote.position.y = (rig.chat ? 3.6 : 2.55) + Math.sin(elapsed * 3) * 0.05;
         } else if (rig.emote) {
           g.remove(rig.emote);
           rig.emote.material.map?.dispose();
@@ -1549,6 +1684,17 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         drawRps();
       }
       for (const d of rpsDeco) d.sp.position.y += Math.sin(elapsed * 2 + d.phase) * dt * 0.15;
+
+      // ── emergency alarm: red blink across the 3D hall ──
+      const sosFresh = st.sos != null && Date.now() - st.sos.at < 3000;
+      if (sosFresh) {
+        const blink = 0.5 + 0.5 * Math.sin(elapsed * 10);
+        sosLight.intensity = 8 + blink * 26;
+        sosDomeMat.emissiveIntensity = 1 + blink * 3;
+      } else {
+        sosLight.intensity += (3 - sosLight.intensity) * Math.min(1, dt * 4);
+        sosDomeMat.emissiveIntensity += (0.7 - sosDomeMat.emissiveIntensity) * Math.min(1, dt * 4);
+      }
       tvGlow.intensity = 8 + Math.sin(elapsed * 6) * 1 + (st.tv.playing ? 3 : 0);
 
       // ── camera follow: both the position AND the gaze point are damped,
@@ -1661,6 +1807,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       window.removeEventListener("resize", onResize);
       window.removeEventListener("keydown", kd);
       window.removeEventListener("keyup", ku);
+      window.removeEventListener("blur", clearKeys);
       renderer.domElement.removeEventListener("wheel", onWheel);
       renderer.domElement.removeEventListener("touchstart", onTouchStart);
       renderer.domElement.removeEventListener("touchmove", onTouchMove);

@@ -53,7 +53,6 @@ toast + fanfare. Intentionally tiny — the next games plug into the same
 `ContextState` zone pattern.
 
 ## Mini-game nº 2 — ✊✋✌️ RPS Showdown
-
 A felt table + live scoreboard on the east side. Walk up and hit ACT to
 challenge; a friend accepts from the table (or the panel). Best of 5, first
 to 3 — secret picks, simultaneous reveal with both signs on the big screen,
@@ -85,6 +84,24 @@ speaking rings, leave. Tokens are minted server-side (`/api/livekit-token`,
   Falls back to demo bots when unreachable.
 - **Firestore** (next) — persistent room config, frames, posters, playlist.
 - **Cloudinary** (next) — actual media files; only URLs live in room data.
+
+## Chat + emergency alarm
+
+- **💬 Hall chat** — history persists in Firestore (`rooms/cozy-hall/messages`,
+  last 100 kept, live-synced). Every message also pops overhead in 3D for ~5s
+  so it's seen with the chat closed. Unread badge on the 💬 button.
+  **Rules addition required** (Firestore → Rules, inside the documents block):
+  ```
+  match /rooms/{roomId}/messages/{messageId} {
+    allow read: if true;
+    allow create: if request.auth != null
+      && request.resource.data.text is string
+      && request.resource.data.text.size() <= 140;
+  }
+  ```
+- **🚨 Emergency button** — red pedestal right of the TV. Walk up + ACT:
+  every screen flashes red with a two-tone siren and a center dialog naming
+  the raiser (✕ dismisses, auto-clears in 3s). Global 10s cooldown.
 
 ## Controls
 

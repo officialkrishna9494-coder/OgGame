@@ -42,3 +42,11 @@ export function winSfx() {
 export function startSfx() {
   [392, 523, 659].forEach((f, i) => blip(f, i * 0.09, 0.2, 0.08, "triangle"));
 }
+
+export function sosSfx() {
+  // two-tone alarm ×3
+  for (let i = 0; i < 3; i++) {
+    blip(660, i * 0.32, 0.15, 0.1, "square");
+    blip(495, i * 0.32 + 0.16, 0.15, 0.1, "square");
+  }
+}
