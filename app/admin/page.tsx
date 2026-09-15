@@ -5,7 +5,7 @@
 // Swap for Firebase Auth custom claims when Google Sign-in lands.
 // Everything here writes RoomConfig → localStorage now, Firestore later.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DEFAULT_ROOM, NEXT_FRAME_SLOT } from "../../lib/room-defaults";
 import { loadRoom, saveRoom, stampRoom } from "../../lib/room-store";
@@ -14,6 +14,20 @@ import { dbConfigured } from "../../lib/db";
 import { cloudinaryConfigured, uploadImage } from "../../lib/media";
 import { voiceConfigured } from "../../lib/voice-config";
 import type { RoomConfig } from "../../lib/hall-types";
+
+function describeSaveError(ex: unknown): string {
+  const code = (ex as { code?: string } | null)?.code ?? "";
+  if (code === "permission-denied" || code.includes("PERMISSION_DENIED")) {
+    return "Firestore denied the write (permission-denied). You're either not signed in on THIS browser/tab, or the Rules don't allow it — open the hall once and log in with Google, then come back.";
+  }
+  if (code === "unavailable" || code === "deadline-exceeded") {
+    return "Couldn't reach Firestore (network). Changes are kept on this device only for now.";
+  }
+  if (code === "not-found") {
+    return "Firestore database not found — create it in the Firebase Console first (Build → Firestore Database).";
+  }
+  return `Couldn't save to Firestore (${code || "unknown error"}). Changes are kept on this device only for now.`;
+}
 
 const PASSCODE = "cozy123";
 
@@ -27,6 +41,27 @@ export default function AdminPage() {
   const [code, setCode] = useState("");
   const [room, setRoom] = useState<RoomConfig | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [signedInAs, setSignedInAs] = useState<string | null>(null);
+  const [checkedAuth, setCheckedAuth] = useState(false);
+
+  // self-diagnosis: admin writes need a Firebase session in THIS browser
+  useEffect(() => {
+    if (!unlocked || !dbConfigured()) return;
+    let alive = true;
+    import("../../lib/firebase-auth")
+      .then(async (m) => {
+        const app = await m.getFirebaseApp();
+        const { getAuth } = await import("firebase/auth");
+        if (alive) {
+          setSignedInAs(getAuth(app).currentUser?.displayName ?? getAuth(app).currentUser?.email ?? null);
+          setCheckedAuth(true);
+        }
+      })
+      .catch(() => alive && setCheckedAuth(true));
+    return () => {
+      alive = false;
+    };
+  }, [unlocked]);
 
   const unlock = () => {
     if (code.trim() === PASSCODE) {
@@ -46,11 +81,7 @@ export default function AdminPage() {
       import("../../lib/db")
         .then((m) => m.saveRoomCloud(next))
         .then(() => setSaveError(null))
-        .catch(() =>
-          setSaveError(
-            "Couldn't save to Firestore — check the database Rules and that you're signed in. Changes are kept on this device only for now."
-          )
-        );
+        .catch((ex: unknown) => setSaveError(describeSaveError(ex)));
     }
   };
 
@@ -101,6 +132,12 @@ export default function AdminPage() {
         {saveError && (
           <p className="mt-3 rounded-2xl bg-[#ffe4e4] px-4 py-2.5 text-[12px] font-semibold leading-relaxed text-[#b03939]">
             ⚠️ {saveError}
+          </p>
+        )}
+        {dbConfigured() && checkedAuth && !signedInAs && (
+          <p className="mt-3 rounded-2xl bg-[#fff3d6] px-4 py-2.5 text-[12px] font-semibold leading-relaxed text-[#7a5b00]">
+            👤 You&apos;re not signed in on this browser — open <Link href="/" className="underline">the hall</Link> once
+            and log in with Google, then edits here will sync to friends.
           </p>
         )}
 
