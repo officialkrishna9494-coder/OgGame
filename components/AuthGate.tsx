@@ -6,6 +6,7 @@
 // firebase          → Google Sign-in (falls back to nickname if env missing)
 
 import { useEffect, useState, type ReactNode } from "react";
+import { Icon } from "./icons";
 import JoinOverlay from "./JoinOverlay";
 import {
   AUTH_MODE,
@@ -64,7 +65,7 @@ export default function AuthGate({ roomName, tagline, children }: Props) {
       .then((unsub) => {
         off = unsub;
       })
-      .catch(() => alive && setError("couldn't reach Google sign-in — check your connection 🌧️"));
+      .catch(() => alive && setError("couldn't reach Google sign-in — check your connection"));
     return () => {
       alive = false;
       off?.();
@@ -80,7 +81,9 @@ export default function AuthGate({ roomName, tagline, children }: Props) {
         onClick={() => setIdentity((id) => id ?? makeQuickplayIdentity())}
       >
         <div className="animate-pulse text-center">
-          <p className="text-4xl">🏠</p>
+          <div className="flex justify-center text-[#3d3347]">
+            <Icon name="home" size={40} />
+          </div>
           <p className="mt-2 text-sm font-bold text-[#8a7f98]">waking up {roomName}…</p>
           <p className="mt-1 text-[11px] font-medium text-[#a99cbb]">tap anywhere if this takes a moment</p>
         </div>
@@ -95,7 +98,9 @@ export default function AuthGate({ roomName, tagline, children }: Props) {
   if (mode === "missing") {
     return (
       <Card>
-        <p className="text-3xl">🔧</p>
+        <div className="flex justify-center text-[#3d3347]">
+          <Icon name="wrench" size={32} />
+        </div>
         <h1 className="mt-2 text-xl font-extrabold text-[#3d3347]">sign-in not configured</h1>
         <p className="mt-1 text-[13px] leading-relaxed text-[#8a7f98]">
           <code className="rounded bg-black/[0.06] px-1.5 py-0.5 font-mono text-[12px]">NEXT_PUBLIC_AUTH_MODE=firebase</code> is
@@ -103,9 +108,9 @@ export default function AuthGate({ roomName, tagline, children }: Props) {
         </p>
         <button
           onClick={() => setMode("nickname")}
-          className="mt-4 w-full rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white hover:bg-[#2e2735]"
+          className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white hover:bg-[#2e2735]"
         >
-          continue with a nickname →
+          continue with a nickname <Icon name="arrowRight" size={15} />
         </button>
       </Card>
     );
@@ -119,7 +124,7 @@ export default function AuthGate({ roomName, tagline, children }: Props) {
       .then((m) => m.signInWithGoogle())
       .then((id) => setIdentity(id))
       .catch(() => {
-        setError("sign-in was cancelled or blocked 🌧️");
+        setError("sign-in was cancelled or blocked");
         setBusy(false);
       });
   };
@@ -139,7 +144,11 @@ export default function AuthGate({ roomName, tagline, children }: Props) {
         </span>
         {busy ? "opening Google…" : "continue with Google"}
       </button>
-      {error && <p className="mt-3 text-[12px] font-semibold text-[#b03939]">{error}</p>}
+      {error && (
+        <p className="mt-3 flex items-center justify-center gap-1.5 text-[12px] font-semibold text-[#b03939]">
+          <Icon name="warning" size={14} /> {error}
+        </p>
+      )}
       <button onClick={() => setMode("nickname")} className="mt-4 text-[12px] font-semibold text-[#a08fb5] hover:text-[#3d3347]">
         use a nickname instead
       </button>

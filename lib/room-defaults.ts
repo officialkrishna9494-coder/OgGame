@@ -65,9 +65,9 @@ export const DEFAULT_ROOM: RoomConfig = {
     },
   ],
   tv: [
-    { id: "jfKfPfyJRdk", title: "lofi hip hop radio 📚 beats to relax/study to" },
-    { id: "5qap5aO4i9A", title: "lofi girl · slow mornings ☕" },
-    { id: "DWcJFNfaw9c", title: "synthwave night drive 🌃" },
+    { id: "jfKfPfyJRdk", title: "lofi hip hop radio · beats to relax/study to" },
+    { id: "5qap5aO4i9A", title: "lofi girl · slow mornings" },
+    { id: "DWcJFNfaw9c", title: "synthwave night drive" },
   ],
 };
 

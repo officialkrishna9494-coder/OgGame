@@ -9,6 +9,8 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { BallState, ContextState, GameState, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
 import { IDLE_CONTEXT } from "../lib/hall-types";
+import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
+import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 
@@ -133,6 +135,27 @@ function makeEmoteSprite(emoji: string): THREE.Sprite {  const c = document.crea
   const sp = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
   );
+  sp.scale.set(0.9, 0.9, 1);
+  return sp;
+}
+
+// soft white disc with an outline icon — table decor in the HUD icon style
+function makeIconBadgeSprite(icon: CanvasIcon): THREE.Sprite {
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "rgba(255,255,255,0.94)";
+  g.strokeStyle = "rgba(61,51,71,0.12)";
+  g.lineWidth = 4;
+  g.beginPath();
+  g.arc(64, 64, 56, 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
+  drawIcon(g, icon, 64, 64, 66, "#3d3347");
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
   sp.scale.set(0.9, 0.9, 1);
   return sp;
 }
@@ -427,6 +450,9 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     const mount = mountRef.current!;
     const W = mount.clientWidth || 800;
     const H = mount.clientHeight || 600;
+    // CSS-pixel size of the view (the HUD shares it) for prompt projection
+    let viewW = W;
+    let viewH = H;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(W, H);
@@ -639,7 +665,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       g.fillStyle = "#ffffff";
       g.font = "700 30px system-ui, sans-serif";
       g.textAlign = "center";
-      g.fillText(tvState.playing ? "▶  NOW PLAYING" : "❚❚  PAUSED", 256, 70);
+      drawIconText(g, tvState.playing ? "play" : "pause", tvState.playing ? "NOW PLAYING" : "PAUSED", 256, 60, 26, "#ffffff");
       g.font = "500 24px system-ui, sans-serif";
       const title = (cur?.title ?? "pick a video from the TV shelf").slice(0, 40);      // wrap
       const words = title.split(" ");
@@ -660,8 +686,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       );
       const mm = `${Math.floor(pos / 60)}:${String(Math.floor(pos % 60)).padStart(2, "0")}`;
       g.font = "700 22px system-ui, sans-serif";
-      g.fillStyle = "#ffd166";
-      g.fillText(`${tvState.playing ? "▶" : "❚❚"} ${mm} · synced`, 256, 218);
+      drawIconText(g, tvState.playing ? "play" : "pause", `${mm} · synced`, 256, 210, 18, "#ffd166");
       g.font = "400 20px system-ui, sans-serif";
       g.fillStyle = "rgba(255,255,255,0.75)";
       g.fillText("open the TV panel below to watch together", 256, 248);
@@ -888,10 +913,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     };
     stoolAt(-11.3, -5.2, "#ff8fab");
     stoolAt(-8.7, -7.8, "#9bf6ff");
-    // floating ✊✋✌️ decor above the table
+    // floating rock · paper · scissors badges above the table
     const rpsDeco: Array<{ sp: THREE.Sprite; phase: number }> = [];
-    ["✊", "✋", "✌️"].forEach((e, i) => {
-      const sp = makeEmoteSprite(e);
+    (["rock", "paper", "scissors"] as const).forEach((e, i) => {
+      const sp = makeIconBadgeSprite(e);
       sp.position.set(RPS_POS.x - 0.8 + i * 0.8, 2.0 + (i % 2) * 0.25, RPS_POS.z);
       sp.scale.set(0.55, 0.55, 1);
       scene.add(sp);
@@ -940,7 +965,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       g.textAlign = "center";
       g.fillStyle = "#ffd166";
       g.font = "800 30px system-ui, sans-serif";
-      g.fillText("✊ ✋ ✌️ SHOWDOWN", 256, 48);
+      g.textBaseline = "middle";
+      g.fillText("SHOWDOWN", 256 + 42, 40);
+      (["rock", "paper", "scissors"] as const).forEach((c, i) => drawIcon(g, c, 118 + i * 34, 40, 28, "#ffd166"));
+      g.textBaseline = "alphabetic";
       const playing = rs.status === "picking" || rs.status === "revealing";
       const waiting = rs.status === "waiting";
       const nameA = playing || rs.status === "ended" ? rs.names.a || "—" : "???";
@@ -969,10 +997,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       // center stage
       if (rs.status === "revealing" && rs.lastReveal) {
         const rv = rs.lastReveal;
-        const em = (c: "rock" | "paper" | "scissors") =>
-          c === "rock" ? "✊" : c === "paper" ? "✋" : "✌️";
-        g.font = "90px serif";
-        g.fillText(`${em(rv.a)}  ${em(rv.b)}`, 256, 225);
+        drawIcon(g, rv.a, 196, 196, 72, "#ff8fab");
+        drawIcon(g, rv.b, 316, 196, 72, "#9bf6ff");
         g.font = "800 30px system-ui, sans-serif";
         g.fillStyle = "#ffd166";
         g.fillText(
@@ -981,8 +1007,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           272
         );
       } else if (rs.status === "ended") {
-        g.font = "90px serif";
-        g.fillText("🏆", 256, 225);
+        drawIcon(g, "trophy", 256, 196, 72, "#ffd166");
         g.font = "800 30px system-ui, sans-serif";
         g.fillStyle = "#ffd166";
         g.fillText(`${(rs.winner ?? "???").slice(0, 16)} WINS!`, 256, 272);
@@ -991,7 +1016,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         g.fillStyle = "#ffffff";
         g.fillText(`${rs.names.a.slice(0, 14)} wants a duel…`, 256, 210);
         g.fillStyle = "rgba(255,255,255,0.75)";
-        g.fillText("stand by the table + ACT!", 256, 248);
+        g.fillText("stand by the table · E or ACT", 256, 248);
       } else if (playing) {
         const left = Math.max(0, Math.ceil((rs.deadline - Date.now()) / 1000));
         g.font = "600 26px system-ui, sans-serif";
@@ -1000,8 +1025,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       } else {
         g.font = "600 24px system-ui, sans-serif";
         g.fillStyle = "rgba(255,255,255,0.85)";
-        g.fillText("table open — stand by + ACT", 256, 210);
-        g.fillText("best of 5 · first to 3 ⭐", 256, 248);
+        g.fillText("table open — stand by · E or ACT", 256, 210);
+        g.fillText("best of 5 · first to 3", 256, 248);
       }
       g.font = "600 20px system-ui, sans-serif";
       g.fillStyle = "rgba(255,255,255,0.7)";
@@ -1166,6 +1191,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     // player position, so footsteps can't shake the frame.
     const lookSm = new THREE.Vector3(0, 1, 2);
     const desired = new THREE.Vector3();
+    const anchorWorld = { x: 0, y: 0, z: 0 };
+    const anchorNdc = new THREE.Vector3();
 
     const step = (dt: number) => {
       const st = stateRef.current;
@@ -1715,6 +1742,22 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       lookSm.z += (tz - 4 - lookSm.z) * Math.min(1, dt * 4);
       camera.lookAt(lookSm);
 
+      // ── in-world prompt: project the current action's anchor to screen ──
+      const pk = actionKey(lastCtx, {
+        sitting: st.players[MY_ID]?.sitting ?? me.sitting,
+        gameStatus: st.game.status,
+      });
+      if (pk) {
+        actionAnchor(pk, me, anchorWorld);
+        anchorNdc.set(anchorWorld.x, anchorWorld.y, anchorWorld.z).project(camera);
+        promptAnchor.key = pk;
+        promptAnchor.visible = anchorNdc.z > -1 && anchorNdc.z < 1;
+        promptAnchor.x = ((anchorNdc.x + 1) / 2) * viewW;
+        promptAnchor.y = ((1 - anchorNdc.y) / 2) * viewH;
+      } else {
+        promptAnchor.key = null;
+      }
+
       // lamp flicker (barely)
       lampLight.intensity = 18 + Math.sin(elapsed * 7.3) * 0.35;
 
@@ -1745,6 +1788,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      viewW = w;
+      viewH = h;
     };
     window.addEventListener("resize", onResize);
 
@@ -1871,6 +1916,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     return () => {
       dead = true;
       hallToss.fn = null;
+      promptAnchor.key = null;
       window.clearInterval(roomTimer);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("keydown", kd);

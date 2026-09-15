@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TvState } from "../lib/hall-types";
+import { Icon } from "./icons";
 
 interface Props {
   tv: TvState;
@@ -235,7 +236,9 @@ export default function TvPanel({ tv, fallbackPlaylist, compact, onControl, onCl
       }`}
     >
       <div className="flex items-center justify-between bg-[#3d3347] px-4 py-2.5 text-white">
-        <p className="text-[13px] font-bold">📺 shared tv {tv.playing ? "· playing" : "· paused"}</p>
+        <p className="flex items-center gap-1.5 text-[13px] font-bold">
+          <Icon name="tv" size={16} /> shared tv {tv.playing ? "· playing" : "· paused"}
+        </p>
         <button onClick={onClose} className="rounded-full bg-white/15 px-2.5 py-0.5 text-[12px] font-bold hover:bg-white/25">
           hide
         </button>
@@ -243,13 +246,14 @@ export default function TvPanel({ tv, fallbackPlaylist, compact, onControl, onCl
       {videoId ? (
         <div ref={mountRef} className="aspect-video w-full bg-black [&>iframe]:h-full [&>iframe]:w-full" />
       ) : (
-        <div className="flex aspect-video w-full items-center justify-center bg-black p-4 text-center text-[12px] text-white/70">
-          no videos yet — add some from room setup 🎬
+        <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 bg-black p-4 text-center text-[12px] text-white/70">
+          <Icon name="video" size={26} />
+          no videos yet — add some from room setup
         </div>
       )}
       {apiFailed && (
-        <p className="bg-[#ffe4e4] px-3 py-1.5 text-[11px] font-semibold text-[#b03939]">
-          YouTube didn&apos;t load (ad-blocker?). Whitelist youtube.com and reopen 📺
+        <p className="flex items-center gap-1.5 bg-[#ffe4e4] px-3 py-1.5 text-[11px] font-semibold text-[#b03939]">
+          <Icon name="warning" size={13} /> YouTube didn&apos;t load (ad-blocker?). Whitelist youtube.com and reopen.
         </p>
       )}
       <div className="flex items-center gap-2 px-3 py-2.5">
@@ -257,22 +261,25 @@ export default function TvPanel({ tv, fallbackPlaylist, compact, onControl, onCl
           onClick={togglePlay}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ff8fab] text-white shadow transition-transform hover:scale-105 active:scale-95"
           title={tv.playing ? "pause for everyone" : "play for everyone"}
+          aria-label={tv.playing ? "pause for everyone" : "play for everyone"}
         >
-          {tv.playing ? "❚❚" : "▶"}
+          <Icon name={tv.playing ? "pause" : "play"} size={17} />
         </button>
         <button
           onClick={() => changeVideo((tv.index + playlist.length - 1) % playlist.length)}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-[#efe8f7] text-[#4a3f55] transition-transform hover:scale-105 active:scale-95"
           title="previous"
+          aria-label="previous video"
         >
-          ⏮
+          <Icon name="previous" size={16} />
         </button>
         <button
           onClick={() => changeVideo((tv.index + 1) % playlist.length)}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-[#efe8f7] text-[#4a3f55] transition-transform hover:scale-105 active:scale-95"
           title="next for everyone"
+          aria-label="next video for everyone"
         >
-          ⏭
+          <Icon name="next" size={16} />
         </button>
         <p className="ml-1 min-w-0 flex-1 truncate text-[12px] font-semibold text-[#4a3f55]">{cur?.title}</p>
       </div>
@@ -293,7 +300,9 @@ export default function TvPanel({ tv, fallbackPlaylist, compact, onControl, onCl
               onClick={() => changeVideo(i)}
               className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-[12px] font-medium transition-colors hover:bg-[#f6efe6] ${i === tv.index % playlist.length ? "bg-[#ffe9f0] font-bold text-[#c2437b]" : "text-[#4a3f55]"}`}
             >
-              <span className="w-4 shrink-0 text-center">{i === tv.index % playlist.length ? "▶" : `${i + 1}`}</span>
+              <span className="flex w-4 shrink-0 justify-center">
+                {i === tv.index % playlist.length ? <Icon name="play" size={12} label="now playing" /> : `${i + 1}`}
+              </span>
               <span className="truncate">{v.title}</span>
             </button>
           ))}

@@ -72,7 +72,9 @@ function endGame(io) {
   game.winner = best ? best.name : null;
   io.to("hall").emit(
     "hall:toast",
-    best ? `⭐ ${best.name} wins the scramble with ${best.points}!` : "⭐ scramble over — no stars caught!"
+    best
+      ? { text: `${best.name} wins the scramble with ${best.points}!`, icon: "trophy" }
+      : { text: "scramble over — no stars caught!", icon: "moon" }
   );
 }
 
@@ -153,7 +155,7 @@ function rpsResolve(io, timeout) {
     rps.endedAt = Date.now();
     io.to("hall").emit(
       "hall:toast",
-      `🏆 ${rps.winner} takes the table ${rps.scores.a}–${rps.scores.b}!`
+      { text: `${rps.winner} takes the table ${rps.scores.a}–${rps.scores.b}!`, icon: "trophy" }
     );
   } else {
     rps.status = "revealing";
@@ -237,7 +239,7 @@ app.prepare().then(() => {
         seatMode: null,
         jumping: false,
       });
-      socket.to("hall").emit("hall:toast", `${clean} stepped in ✨`);
+      socket.to("hall").emit("hall:toast", { text: `${clean} stepped in`, icon: "sparkle" });
       dirty = true;
       socket.emit("hall:state", snapshot());
     });
@@ -282,7 +284,7 @@ app.prepare().then(() => {
       players.set(socket.id, { ...cur, action: kind, actionAt: Date.now(), actionTarget: targetId ?? null });
       if (kind === "poke" && targetId && players.has(targetId)) {
         const target = players.get(targetId);
-        io.to("hall").emit("hall:toast", `${cur.name} poked ${target.name} 👉`);
+        io.to("hall").emit("hall:toast", { text: `${cur.name} poked ${target.name}`, icon: "poke" });
         const victim = players.get(targetId);
         players.set(targetId, { ...victim, action: "poke", actionAt: Date.now(), actionTarget: socket.id });
       }
@@ -290,7 +292,7 @@ app.prepare().then(() => {
         const target = targetId && players.has(targetId) ? players.get(targetId) : null;
         io.to("hall").emit(
           "hall:toast",
-          target ? `${cur.name} + ${target.name} high-fived! 🙌` : `${cur.name} threw a high-five! 🙌`
+          { text: target ? `${cur.name} + ${target.name} high-fived!` : `${cur.name} threw a high-five!`, icon: "highFive" }
         );
         if (target) {
           players.set(target.id, { ...target, action: "highfive", actionAt: Date.now(), actionTarget: socket.id });
@@ -318,7 +320,7 @@ app.prepare().then(() => {
       const freshThrow = ball.thrownAt && Date.now() - ball.thrownAt < 6000;
       io.to("hall").emit(
         "hall:toast",
-        thrower && freshThrow ? `💥 ${thrower.name} bonked ${cur.name}!` : `💥 ${cur.name} got bonked!`
+        { text: thrower && freshThrow ? `${thrower.name} bonked ${cur.name}!` : `${cur.name} got bonked!`, icon: "bonk" }
       );
       dirty = true;
     });
@@ -343,7 +345,7 @@ app.prepare().then(() => {
       const m = meta.get(socket.id);
       lastSosAt = now;
       sos = { by: socket.id, name: m?.name ?? "Someone", at: now };
-      io.to("hall").emit("hall:toast", `🚨 ${sos.name} raised an EMERGENCY signal!`);
+      io.to("hall").emit("hall:toast", { text: `${sos.name} raised an EMERGENCY signal!`, icon: "sos" });
       dirty = true;
     });
 
@@ -404,7 +406,7 @@ app.prepare().then(() => {
         lastCollect: null,
         winner: null,
       };
-      io.to("hall").emit("hall:toast", `⭐ ${m?.name ?? "Someone"} started a star scramble — grab them!`);
+      io.to("hall").emit("hall:toast", { text: `${m?.name ?? "Someone"} started a star scramble — grab them!`, icon: "starGame" });
       dirty = true;
     });
 
@@ -438,7 +440,7 @@ app.prepare().then(() => {
         rps.seats = { a: socket.id, b: null };
         rps.names = { a: name, b: "" };
         rps.status = "waiting";
-        io.to("hall").emit("hall:toast", `✊ ${name} wants a duel — stand by the table to accept!`);
+        io.to("hall").emit("hall:toast", { text: `${name} wants a duel — stand by the table to accept!`, icon: "duel" });
         dirty = true;
       } else if (
         rps.status === "waiting" &&
@@ -454,7 +456,7 @@ app.prepare().then(() => {
         rps.winner = null;
         rps.deadline = Date.now() + RPS_ROUND_MS;
         rps.status = "picking";
-        io.to("hall").emit("hall:toast", `✊ ${rps.names.a} vs ${name} — best of 5, throw your signs!`);
+        io.to("hall").emit("hall:toast", { text: `${rps.names.a} vs ${name} — best of 5, throw your signs!`, icon: "duel" });
         dirty = true;
       }
     });
@@ -486,10 +488,10 @@ app.prepare().then(() => {
           rps.status = "ended";
           rps.winner = winnerName;
           rps.endedAt = Date.now();
-          io.to("hall").emit("hall:toast", `🏆 ${winnerName} takes it — ${leaver} walked away!`);
+          io.to("hall").emit("hall:toast", { text: `${winnerName} takes it — ${leaver} walked away!`, icon: "trophy" });
         } else {
           rpsReset();
-          io.to("hall").emit("hall:toast", `✊ the duel fizzled — table's open!`);
+          io.to("hall").emit("hall:toast", { text: "the duel fizzled — table's open!", icon: "duel" });
         }
         dirty = true;
       }
@@ -516,13 +518,13 @@ app.prepare().then(() => {
             rps.status = "ended";
             rps.winner = winnerName;
             rps.endedAt = Date.now();
-            io.to("hall").emit("hall:toast", `🏆 ${winnerName} takes it — rival disconnected!`);
+            io.to("hall").emit("hall:toast", { text: `${winnerName} takes it — rival disconnected!`, icon: "trophy" });
           } else {
             rpsReset();
           }
         }
       }
-      if (m) socket.to("hall").emit("hall:toast", `${m.name} drifted off 🌙`);
+      if (m) socket.to("hall").emit("hall:toast", { text: `${m.name} drifted off`, icon: "moon" });
       dirty = true;
     });
   });

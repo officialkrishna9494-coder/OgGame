@@ -6,6 +6,7 @@
 
 import type { Voice } from "../lib/useVoice";
 import { voiceConfigured } from "../lib/voice-config";
+import { Icon } from "./icons";
 
 interface Props {
   voice: Voice;
@@ -25,8 +26,8 @@ export default function VoicePanel({ voice, compact, onClose }: Props) {
       }`}
     >
       <div className="flex items-center justify-between bg-gradient-to-r from-[#8ce8c0] to-[#9bf6ff] px-4 py-2.5 text-[#234034]">
-        <p className="text-[13px] font-bold">
-          🎙️ voice channel{" "}
+        <p className="flex items-center gap-1.5 text-[13px] font-bold">
+          <Icon name="voice" size={16} /> voice channel{" "}
           {status === "live" ? `· ${peers.length} in` : status === "connecting" ? "· joining…" : ""}
         </p>
         <button onClick={onClose} className="rounded-full bg-black/10 px-2.5 py-0.5 text-[12px] font-bold hover:bg-black/15">
@@ -36,23 +37,29 @@ export default function VoicePanel({ voice, compact, onClose }: Props) {
 
       <div className="px-4 py-3">
         {!voiceConfigured() && (
-          <p className="rounded-2xl bg-[#faf6ef] px-3 py-2.5 text-[12px] leading-relaxed text-[#8a7f98]">
-            Voice isn&apos;t set up on this server yet — add your LiveKit URL + keys and redeploy. See README → Voice. 🎙️
+          <p className="flex gap-2 rounded-2xl bg-[#faf6ef] px-3 py-2.5 text-[12px] leading-relaxed text-[#8a7f98]">
+            <Icon name="wrench" size={15} className="mt-0.5" />
+            <span>Voice isn&apos;t set up on this server yet — add your LiveKit URL + keys and redeploy. See README, “Voice”.</span>
           </p>
         )}
 
         {status === "idle" || status === "error" ? (
           <>
-            <p className="text-[13px] leading-relaxed text-[#4a3f55]">
-              Talk while you wander — whoever joins the hall can hop in. 🎧
+            <p className="flex gap-2 text-[13px] leading-relaxed text-[#4a3f55]">
+              <Icon name="headphones" size={17} className="mt-0.5 text-[#40916c]" />
+              <span>Talk while you wander — whoever joins the hall can hop in.</span>
             </p>
-            {error && <p className="mt-2 text-[12px] font-semibold text-[#b03939]">{error}</p>}
+            {error && (
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] font-semibold text-[#b03939]">
+                <Icon name="warning" size={14} /> {error}
+              </p>
+            )}
             <button
               onClick={() => void voice.join()}
               disabled={!voiceConfigured()}
-              className="mt-3 w-full rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white shadow-lg transition-transform hover:bg-[#2e2735] active:scale-[0.98] disabled:opacity-40"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white shadow-lg transition-transform hover:bg-[#2e2735] active:scale-[0.98] disabled:opacity-40"
             >
-              join voice 🎙️
+              <Icon name="voice" size={17} /> join voice
             </button>
           </>
         ) : (
@@ -60,9 +67,9 @@ export default function VoicePanel({ voice, compact, onClose }: Props) {
             {audioBlocked && (
               <button
                 onClick={voice.unblockAudio}
-                className="mb-2 w-full rounded-2xl bg-[#fff3d6] px-3 py-2 text-[12px] font-bold text-[#7a5b00]"
+                className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-2xl bg-[#fff3d6] px-3 py-2 text-[12px] font-bold text-[#7a5b00]"
               >
-                🔊 tap to enable sound
+                <Icon name="sound" size={15} /> tap to enable sound
               </button>
             )}
             <div className="flex max-h-36 flex-col gap-1 overflow-y-auto">
@@ -84,7 +91,12 @@ export default function VoicePanel({ voice, compact, onClose }: Props) {
                     {peer.name}
                     {peer.isLocal && <span className="ml-1 text-[10px] font-bold text-[#a08fb5]">you</span>}
                   </span>
-                  <span className="text-[13px]">{peer.micOn ? (peer.speaking ? "🗣️" : "🎙️") : "🔇"}</span>
+                  <Icon
+                    name={peer.micOn ? (peer.speaking ? "speaking" : "voice") : "voiceOff"}
+                    size={16}
+                    label={peer.micOn ? (peer.speaking ? "speaking" : "mic on") : "muted"}
+                    className={peer.micOn ? (peer.speaking ? "text-green-600" : "text-[#8a7f98]") : "text-[#b03939]"}
+                  />
                 </div>
               ))}
               {peers.length === 0 && (
@@ -95,17 +107,17 @@ export default function VoicePanel({ voice, compact, onClose }: Props) {
               <button
                 onClick={() => void voice.toggleMute()}
                 disabled={status !== "live"}
-                className={`flex-1 rounded-2xl py-2.5 text-[13px] font-bold shadow transition-transform active:scale-[0.98] disabled:opacity-40 ${
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-2xl py-2.5 text-[13px] font-bold shadow transition-transform active:scale-[0.98] disabled:opacity-40 ${
                   muted ? "bg-[#b03939] text-white" : "bg-[#efe8f7] text-[#4a3f55]"
                 }`}
               >
-                {muted ? "🔇 unmute" : "🎙️ mute"}
+                <Icon name={muted ? "voiceOff" : "voice"} size={15} /> {muted ? "unmute" : "mute"}
               </button>
               <button
                 onClick={voice.leave}
-                className="flex-1 rounded-2xl bg-[#3d3347] py-2.5 text-[13px] font-bold text-white transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-[#3d3347] py-2.5 text-[13px] font-bold text-white transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
               >
-                leave 👋
+                <Icon name="signOut" size={15} /> leave
               </button>
             </div>
           </>

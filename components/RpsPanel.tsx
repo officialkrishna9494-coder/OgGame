@@ -6,7 +6,8 @@
 
 import { useEffect, useState } from "react";
 import type { RpsChoice, RpsState } from "../lib/hall-types";
-import { RPS_CHOICES, RPS_EMOJI, RPS_ROUND_MS } from "../lib/hall-types";
+import { RPS_CHOICES, RPS_ROUND_MS } from "../lib/hall-types";
+import { Icon } from "./icons";
 
 interface Props {
   rps: RpsState;
@@ -34,11 +35,12 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
   const role = rps.seats.a === mySocketId ? "a" : rps.seats.b === mySocketId ? "b" : null;
   const left = useCountdown(rps.status === "picking", rps.deadline);
   const myPick = role ? rps.picks[role] : null;
+  const actHint = compact ? "tap ACT" : "press E";
 
   const title =
-    rps.status === "idle" ? "✊✋✌️ showdown"
+    rps.status === "idle" ? "rock · paper · scissors"
     : rps.status === "waiting" ? "waiting for a rival…"
-    : rps.status === "ended" ? "🏆 table taken!"
+    : rps.status === "ended" ? "table taken!"
     : `round ${rps.round} · first to 3`;
 
   return (
@@ -50,7 +52,9 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
       }`}
     >
       <div className="flex items-center justify-between bg-gradient-to-r from-[#2d6a4f] to-[#40916c] px-4 py-2.5 text-white">
-        <p className="text-[13px] font-bold">{title}</p>
+        <p className="flex items-center gap-1.5 text-[13px] font-bold">
+          <Icon name={rps.status === "ended" ? "trophy" : "rps"} size={16} /> {title}
+        </p>
         <button onClick={onClose} className="rounded-full bg-white/20 px-2.5 py-0.5 text-[12px] font-bold hover:bg-white/30">
           hide
         </button>
@@ -60,13 +64,13 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
         {rps.status === "idle" && (
           <>
             <p className="text-[13px] leading-relaxed text-[#4a3f55]">
-              Best of 5 at the felt table — first to <b>3 round wins</b> takes it. Stand by the table and throw down. 🎲
+              Best of 5 at the felt table — first to <b>3 round wins</b> takes it. Stand by the table and throw down.
             </p>
             <button
               onClick={onChallenge}
-              className="mt-3 w-full rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white shadow-lg transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white shadow-lg transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
             >
-              challenge the table ✊
+              <Icon name="duel" size={17} /> challenge the table
             </button>
           </>
         )}
@@ -77,15 +81,15 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
               {rps.names.a} wants a duel…
             </p>
             <p className="mt-1 text-center text-[12px] text-[#8a7f98]">
-              {role === "a" ? "tell a friend to stand by the table + ACT!" : "stand by the table and hit ACT to accept! ⚡"}
+              {role === "a" ? `tell a friend to stand by the table and ${actHint}` : `stand by the table and ${actHint} to accept`}
             </p>
             <div className="mt-3 flex gap-2">
               {role === null ? (
                 <button
                   onClick={onChallenge}
-                  className="flex-1 rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white active:scale-[0.98]"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white active:scale-[0.98]"
                 >
-                  accept ✊
+                  <Icon name="duel" size={16} /> accept
                 </button>
               ) : (
                 <button
@@ -110,19 +114,25 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
                       <button
                         key={c}
                         onClick={() => onPick(c)}
-                        className={`flex flex-col items-center rounded-2xl py-2.5 shadow transition-all active:scale-95 ${
+                        className={`flex flex-col items-center gap-1 rounded-2xl py-3 shadow transition-all active:scale-95 ${
                           myPick === c
                             ? "bg-[#3d3347] text-white ring-2 ring-[#ffd166]"
                             : "bg-[#efe8f7] text-[#4a3f55] hover:bg-[#e2d6f2]"
                         }`}
                       >
-                        <span className="text-3xl">{RPS_EMOJI[c]}</span>
-                        <span className="mt-0.5 text-[11px] font-extrabold uppercase">{c}</span>
+                        <Icon name={c} size={30} />
+                        <span className="text-[11px] font-extrabold uppercase">{c}</span>
                       </button>
                     ))}
                   </div>
-                  <p className="mt-2 text-center text-[12px] font-bold tabular-nums text-[#8a7f98]">
-                    {myPick ? "locked in — waiting on your rival…" : `${left}s to throw!`}
+                  <p className="mt-2 flex items-center justify-center gap-1 text-center text-[12px] font-bold tabular-nums text-[#8a7f98]">
+                    {myPick ? (
+                      "locked in — waiting on your rival…"
+                    ) : (
+                      <>
+                        <Icon name="timer" size={13} /> {left}s to throw!
+                      </>
+                    )}
                   </p>
                 </>
               ) : (
@@ -133,8 +143,8 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
                 {rps.status === "revealing" && rps.lastReveal ? (
                   <Reveal rps={rps} role={null} />
                 ) : (
-                  <p className="mt-2 text-center text-[12px] font-semibold text-[#8a7f98]">
-                    {rps.names.a} vs {rps.names.b} — throwing… popcorn? 🍿
+                  <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[12px] font-semibold text-[#8a7f98]">
+                    <Icon name="popcorn" size={14} /> {rps.names.a} vs {rps.names.b} — throwing…
                   </p>
                 )}
                 {rps.status === "picking" && (
@@ -155,16 +165,18 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
 
         {rps.status === "ended" && (
           <>
-            <p className="text-center text-4xl">🏆</p>
+            <div className="flex justify-center text-[#e0a100]">
+              <Icon name="trophy" size={40} />
+            </div>
             <p className="mt-1 text-center text-[16px] font-extrabold text-[#3d3347]">
               {rps.winner} takes it {rps.scores.a}–{rps.scores.b}!
             </p>
             <ScoreLine rps={rps} />
             <button
               onClick={onChallenge}
-              className="mt-3 w-full rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white active:scale-[0.98]"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white active:scale-[0.98]"
             >
-              run it back ↻
+              <Icon name="again" size={16} /> run it back
             </button>
           </>
         )}
@@ -188,23 +200,35 @@ function ScoreLine({ rps }: { rps: RpsState }) {
 function Reveal({ rps, role }: { rps: RpsState; role: "a" | "b" | null }) {
   const rv = rps.lastReveal;
   if (!rv) return null;
+  const iWon = role !== null && rv.result === role;
   const verdict =
     rv.result === "draw"
       ? "draw — replay the round!"
       : role === null
         ? `${rv.result === "a" ? rps.names.a : rps.names.b} takes round ${rv.round}!`
-        : rv.result === role
-          ? `you take round ${rv.round}! 🎉`
+        : iWon
+          ? `you take round ${rv.round}!`
           : `${rv.result === "a" ? rps.names.a : rps.names.b} takes round ${rv.round}`;
   return (
     <div className="animate-pop-in mt-2 rounded-2xl bg-[#fff3d6] px-3 py-2.5 text-center">
-      <p className="text-4xl">
-        {RPS_EMOJI[rv.a]} <span className="text-2xl text-[#a99cbb]">vs</span> {RPS_EMOJI[rv.b]}
-      </p>
-      <p className="mt-1 text-[13px] font-extrabold text-[#7a5b00]">
+      <div className="flex items-center justify-center gap-3 text-[#3d3347]">
+        <span className="text-[#e0577f]">
+          <Icon name={rv.a} size={40} label={rv.a} />
+        </span>
+        <span className="text-[15px] font-black text-[#a99cbb]">vs</span>
+        <span className="text-[#2a9fb0]">
+          <Icon name={rv.b} size={40} label={rv.b} />
+        </span>
+      </div>
+      <p className="mt-1 flex items-center justify-center gap-1 text-[13px] font-extrabold text-[#7a5b00]">
+        {iWon && <Icon name="confetti" size={15} />}
         {verdict}
-        {rv.timeout && <span className="ml-1 text-[11px] font-semibold">(slowpoke auto-pick 🎲)</span>}
       </p>
+      {rv.timeout && (
+        <p className="flex items-center justify-center gap-1 text-[11px] font-semibold text-[#7a5b00]/80">
+          <Icon name="dice" size={12} /> slowpoke auto-pick
+        </p>
+      )}
     </div>
   );
 }

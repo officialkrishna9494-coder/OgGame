@@ -1,24 +1,31 @@
 "use client";
 
 // ─── Cozy Hall · HUD — one environment, everything within reach ─────────────
-// Desktop: single rounded action dock along the bottom (unchanged).
+// Desktop: single rounded action dock along the bottom, with the contextual
+// action first (press E) and a keyboard legend underneath.
 // Mobile landscape, console layout: floating joystick in the left thumb
-// zone; on the right, the one contextual ACT button with a "⋯" button
-// above it that opens a compact, scrollable tile menu (emojis tucked
-// behind its 😊 tile). Pinch the hall to zoom; fullscreen lives top-right.
+// zone; on the right, the contextual ACT button with a "⋯" button above it
+// that opens a compact, scrollable tile menu (emotes tucked behind "react").
+// Both: an in-world prompt floats over whatever you can use right now.
+// Icons come from components/icons — emoji appear only as emotes.
 
 import { useEffect, useRef, useState } from "react";
 import { EMOTES } from "../lib/hall-types";
 import type { ContextState, PlayerState } from "../lib/hall-types";
 import { markNudgeSeen, nudgeSeen, useFullscreen } from "../lib/fullscreen";
+import { resolveAction, type ActionKey, type InteractAction } from "../lib/interaction";
+import type { Toast } from "../lib/useHallSocket";
+import { useInteraction, type Interaction } from "../lib/useInteraction";
 import type { VoiceStatus } from "../lib/useVoice";
 import { FullscreenNudge, FullscreenToggle } from "./FullscreenControls";
+import { Icon, isIconName, type IconName } from "./icons";
+import InteractPrompt, { HoldRing, KeyCap } from "./InteractPrompt";
 import Joystick from "./Joystick";
 
 interface Props {
   roomName: string;
   players: Record<string, PlayerState>;
-  toasts: string[];
+  toasts: Toast[];
   sitting: boolean;
   nearName: string | null;
   tvOpen: boolean;
@@ -28,8 +35,8 @@ interface Props {
   mobile?: boolean;
   context?: ContextState;
   gameStatus?: string;
-  gameOpen?: boolean;
   rpsStatus?: string;
+  rpsSeat?: "a" | "b" | null;
   unreadCount?: number;
   chatOpen?: boolean;
   voiceStatus?: VoiceStatus;
@@ -43,7 +50,8 @@ interface Props {
   onSofaSit: () => void;
   onToss: () => void;
   onToggleTv: () => void;
-  onToggleGame: () => void;
+  /** star scramble starts from the rug (ACT / E) — it has no menu button */
+  onStartGame: () => void;
   onToggleVoice: () => void;
   onToggleRps: () => void;
   onRpsAct: () => void;
@@ -52,70 +60,44 @@ interface Props {
   onOpenAddLink: () => void;
 }
 
-// ─── the one universal ACT button ───────────────────────────────────────────
-// Same priority everywhere: SOS alarm → toss (holding) → add link (near TV)
-// → duel (at the RPS table) → play (on the rug, star game idle) → sofa
-// sit/stand. Everything else lives in menus.
-interface PrimaryAction {
-  key: string;
-  icon: string;
-  label: string;
-  glow: string;
-  run: () => void;
-}
-
-function primaryAction(
-  ctx: ContextState | undefined,
-  flags: { sitting: boolean; gameStatus?: string },
-  h: {
-    onSos: () => void;
-    onToss: () => void;
-    onOpenAddLink: () => void;
-    onRpsAct: () => void;
-    onToggleGame: () => void;
-    onSofaSit: () => void;
-  }
-): PrimaryAction | null {
-  if (!ctx) return null;
-  if (ctx.nearEmergency)
-    return { key: "sos", icon: "🚨", label: "sos", glow: "#ff3b3b", run: h.onSos };
-  if (ctx.holdingBall)
-    return { key: "toss", icon: "⚽", label: "toss", glow: "#ff6b6b", run: h.onToss };
-  if (ctx.nearTv)
-    return { key: "addlink", icon: "🔗", label: "add link", glow: "#ff8fab", run: h.onOpenAddLink };
-  if (ctx.nearRps)
-    return { key: "duel", icon: "✊", label: "duel", glow: "#40916c", run: h.onRpsAct };
-  if (ctx.nearGame && flags.gameStatus === "idle")
-    return { key: "play", icon: "⭐", label: "play", glow: "#ffb703", run: h.onToggleGame };
-  if (ctx.nearSofa)
-    return {
-      key: flags.sitting ? "stand" : "sit",
-      icon: "🛋️",
-      label: flags.sitting ? "stand" : "sit",
-      glow: "#a0c4ff",
-      run: h.onSofaSit,
-    };
-  return null;
-}
+type HudProps = Props & {
+  others: Array<[string, PlayerState]>;
+  count: number;
+  action: InteractAction | null;
+  interaction: Interaction;
+};
 
 export default function Hud(p: Props) {
   const [emoteOpen, setEmoteOpen] = useState(false);
   const others = Object.entries(p.players).filter(([id]) => id !== "me");
   const count = Object.keys(p.players).length;
 
-  if (p.mobile) return <MobileHud {...p} others={others} count={count} />;
+  // the one contextual action — same resolver the 3D prompt uses
+  const action = resolveAction(p.context, {
+    sitting: p.sitting,
+    gameStatus: p.gameStatus,
+    rpsStatus: p.rpsStatus,
+    rpsSeat: p.rpsSeat,
+  });
+  const run = (key: ActionKey) => {
+    if (key === "sos") p.onSos();
+    else if (key === "toss") p.onToss();
+    else if (key === "addLink") p.onOpenAddLink();
+    else if (key === "duel") p.onRpsAct();
+    else if (key === "starGame") p.onStartGame();
+    else p.onSofaSit(); // sit / stand
+  };
+  const interaction = useInteraction(action, run);
+
+  if (p.mobile) return <MobileHud {...p} others={others} count={count} action={action} interaction={interaction} />;
 
   const btn =
-    "flex h-11 items-center justify-center gap-1.5 rounded-2xl bg-white/85 px-3.5 text-[13px] font-bold text-[#4a3f55] shadow-[0_6px_20px_-8px_rgba(90,70,110,0.4)] ring-1 ring-black/[0.06] backdrop-blur transition-all hover:bg-white active:scale-95 disabled:opacity-35 disabled:saturation-50";
-
-  const primary = primaryAction(
-    p.context,
-    { sitting: p.sitting, gameStatus: p.gameStatus },
-    { onSos: p.onSos, onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onRpsAct: p.onRpsAct, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
-  );
+    "flex h-11 items-center justify-center gap-1.5 rounded-2xl bg-white/85 px-3.5 text-[13px] font-bold text-[#4a3f55] shadow-[0_6px_20px_-8px_rgba(90,70,110,0.4)] ring-1 ring-black/[0.06] backdrop-blur transition-all hover:bg-white active:scale-95 disabled:opacity-35 disabled:saturate-50";
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between">
+      <InteractPrompt action={action} interaction={interaction} showKey />
+
       {/* ── top bar ── */}
       <div className="flex items-start justify-between gap-3 p-3 sm:p-4">
         <div className="pointer-events-auto flex items-center gap-2.5 rounded-2xl bg-white/80 py-2 pl-3 pr-4 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
@@ -123,21 +105,31 @@ export default function Hud(p: Props) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={p.photoUrl} alt="" className="h-8 w-8 rounded-xl object-cover" />
           ) : (
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff8fab] to-[#bdb2ff] text-base">🏠</span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff8fab] to-[#bdb2ff] text-white">
+              <Icon name="home" size={17} />
+            </span>
           )}
           <div className="leading-tight">
             <p className="text-[13px] font-extrabold text-[#3d3347]">{p.roomName}</p>
-            <p className="text-[11px] font-medium text-[#8a7f98]">
-              {count} inside{p.simulated ? " · demo bots 🤖" : " · live"}
+            <p className="flex items-center gap-1 text-[11px] font-medium text-[#8a7f98]">
+              {count} inside ·{" "}
+              {p.simulated ? (
+                <>
+                  demo bots <Icon name="bot" size={12} />
+                </>
+              ) : (
+                "live"
+              )}
             </p>
           </div>
           {p.onSignOut && (
             <button
               onClick={p.onSignOut}
               title="sign out"
-              className="ml-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.05] text-[13px] transition-colors hover:bg-black/10"
+              aria-label="sign out"
+              className="ml-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.05] text-[#4a3f55] transition-colors hover:bg-black/10"
             >
-              ⏻
+              <Icon name="signOut" size={14} />
             </button>
           )}
         </div>
@@ -149,20 +141,22 @@ export default function Hud(p: Props) {
               {pl.name.slice(0, 8)}
             </span>
           ))}
-          {others.length === 0 && <span className="px-1 text-[11px] font-medium text-[#8a7f98]">just you… for now</span>}
+          {others.length === 0 && (
+            <span className="flex items-center gap-1 px-1 text-[11px] font-medium text-[#8a7f98]">
+              <Icon name="user" size={12} /> just you… for now
+            </span>
+          )}
         </div>
       </div>
 
       {/* ── toasts ── */}
       <div className="flex flex-col items-center gap-1.5">
-        {p.toasts.map((t, i) => (
-          <div key={`${t}-${i}`} className="animate-[floatUp_0.3s_ease-out] rounded-full bg-[#3d3347]/90 px-4 py-1.5 text-[12px] font-semibold text-white shadow-lg backdrop-blur">
-            {t}
-          </div>
+        {p.toasts.map((t) => (
+          <ToastPill key={t.id} toast={t} />
         ))}
         {p.nearName && (
-          <div className="rounded-full bg-[#ff8fab]/95 px-4 py-1.5 text-[12px] font-bold text-white shadow-lg">
-            {p.nearName} is close — poke or high-five! ✋
+          <div className="flex items-center gap-1.5 rounded-full bg-[#ff8fab]/95 px-4 py-1.5 text-[12px] font-bold text-white shadow-lg">
+            <Icon name="wave" size={14} /> {p.nearName} is close — poke or high-five!
           </div>
         )}
       </div>
@@ -174,6 +168,7 @@ export default function Hud(p: Props) {
             {EMOTES.map((e) => (
               <button
                 key={e}
+                aria-label={`send ${e}`}
                 onClick={() => {
                   p.onEmote(e);
                   setEmoteOpen(false);
@@ -186,93 +181,105 @@ export default function Hud(p: Props) {
           </div>
         )}
         <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-[22px] bg-[#3d3347]/10 p-1.5 backdrop-blur">
-          {primary && (
+          {action && (
             <button
-              key={primary.key}
-              className={`${btn} animate-pop-in !bg-[#3d3347] !text-white`}
-              style={{ boxShadow: `0 8px 24px -8px ${primary.glow}` }}
-              onClick={primary.run}
-              title={`act · ${primary.label}`}
+              key={action.key}
+              {...interaction.bind}
+              onContextMenu={(e) => e.preventDefault()}
+              className={`${btn} animate-pop-in select-none !bg-[#3d3347] !pr-2 !text-white`}
+              style={{ boxShadow: `0 8px 24px -8px ${action.glow}` }}
+              title={`${action.prompt} · E`}
             >
-              <span className="text-base">{primary.icon}</span> ⚡{primary.label}
+              <span key={interaction.pulse} className={`flex items-center gap-1.5 ${interaction.pulse ? "animate-act-press" : ""}`}>
+                <Icon name={action.icon} size={17} />
+                {action.label}
+                <span className="ml-1">
+                  <KeyCap holding={interaction.holding} glow={action.glow} />
+                </span>
+              </span>
             </button>
           )}
-          <button className={btn} onClick={() => setEmoteOpen((v) => !v)} title="send emoji">
-            <span className="text-base">😊</span> react
+          <button className={`${btn} ${emoteOpen ? "!bg-[#3d3347] !text-white" : ""}`} onClick={() => setEmoteOpen((v) => !v)} title="send an emote">
+            <Icon name="react" size={17} /> react
           </button>
           <button className={btn} onClick={p.onPoke} disabled={!p.nearName} title={p.nearName ? `poke ${p.nearName}` : "walk close to a friend"}>
-            👉 poke
+            <Icon name="poke" size={17} /> poke
           </button>
           <button className={btn} onClick={p.onHighfive} disabled={!p.nearName} title={p.nearName ? `high-five ${p.nearName}` : "walk close to a friend"}>
-            🙌 five
+            <Icon name="highFive" size={17} /> five
           </button>
-          <button
-            className={`${btn} ${p.sitting ? "!bg-[#3d3347] !text-white" : ""}`}
-            onClick={p.onSit}
-            title="sit right here"
-          >
-            💺 {p.sitting ? "stand" : "sit"}
+          <button className={`${btn} ${p.sitting ? "!bg-[#3d3347] !text-white" : ""}`} onClick={p.onSit} title="sit right here">
+            <Icon name="sit" size={17} /> {p.sitting ? "stand" : "sit"}
           </button>
-          <button
-            className={`${btn} ${p.gameOpen ? "!bg-[#ffb703] !text-white" : ""}`}
-            onClick={p.onToggleGame}
-            title="star scramble mini-game"
-          >
-            ⭐ {p.gameStatus === "playing" ? "playing!" : "game"}
+          <button className={btn} onClick={p.onToggleRps} title="rock-paper-scissors arena">
+            <IconWithDot name="rps" dot={p.rpsStatus === "picking" || p.rpsStatus === "revealing"} /> rps
           </button>
-          <button
-            className={btn}
-            onClick={p.onToggleRps}
-            title="rock-paper-scissors arena"
-          >
-            <span className="relative text-base">
-              ✊
-              {(p.rpsStatus === "picking" || p.rpsStatus === "revealing") && (
-                <span className="absolute -right-1 -top-1 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white" />
-              )}
-            </span>{" "}
-            rps
-          </button>
-          <button
-            className={`${btn} ${p.voiceOpen ? "!bg-[#8ce8c0] !text-[#234034]" : ""}`}
-            onClick={p.onToggleVoice}
-            title="voice channel"
-          >
-            <span className="relative text-base">
-              🎙️
-              {p.voiceStatus === "live" && (
-                <span className="absolute -right-1 -top-1 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white" />
-              )}
-            </span>{" "}
+          <button className={`${btn} ${p.voiceOpen ? "!bg-[#8ce8c0] !text-[#234034]" : ""}`} onClick={p.onToggleVoice} title="voice channel">
+            <IconWithDot name="voice" dot={p.voiceStatus === "live"} />
             {p.voiceStatus === "live" ? `voice${p.voiceCount ? ` · ${p.voiceCount}` : ""}` : "voice"}
           </button>
-          <button
-            className={`${btn} ${p.tvOpen ? "!bg-[#ff8fab] !text-white" : ""}`}
-            onClick={p.onToggleTv}
-            title="shared TV"
-          >
-            📺 {p.tvOpen ? "hide" : "tv"}
+          <button className={`${btn} ${p.tvOpen ? "!bg-[#ff8fab] !text-white" : ""}`} onClick={p.onToggleTv} title="shared TV">
+            <Icon name="tv" size={17} /> {p.tvOpen ? "hide" : "tv"}
           </button>
-          <button
-            className={`${btn} ${p.chatOpen ? "!bg-[#3d3347] !text-white" : ""}`}
-            onClick={p.onToggleChat}
-            title="hall chat"
-          >
-            <span className="relative text-base">
-              💬
+          <button className={`${btn} ${p.chatOpen ? "!bg-[#3d3347] !text-white" : ""}`} onClick={p.onToggleChat} title="hall chat">
+            <span className="relative flex">
+              <Icon name="chat" size={17} />
               {p.unreadCount ? (
                 <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff3b3b] px-1 text-[9px] font-black text-white ring-2 ring-white">
                   {p.unreadCount > 9 ? "9+" : p.unreadCount}
                 </span>
               ) : null}
-            </span>{" "}
+            </span>
             chat
           </button>
         </div>
-        <p className="max-w-[92vw] truncate text-[11px] font-medium text-[#3d3347]/50">
-          {p.tvTitle ? `on the tv · ${p.tvTitle}` : "walk over the ball to pick it up · sit faces the tv"}
-        </p>
+        <div className="flex max-w-[92vw] items-center gap-2 text-[11px] font-medium text-[#3d3347]/55">
+          {p.tvTitle && (
+            <>
+              <span className="flex min-w-0 items-center gap-1">
+                <Icon name="tv" size={13} />
+                <span className="truncate">on the tv · {p.tvTitle}</span>
+              </span>
+              <span className="h-3 w-px shrink-0 bg-[#3d3347]/20" />
+            </>
+          )}
+          <span className="flex shrink-0 items-center gap-1.5">
+            <LegendKey>W A S D</LegendKey> move
+            <LegendKey>Space</LegendKey> hop
+            <LegendKey>E</LegendKey> interact
+          </span>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function LegendKey({ children }: { children: string }) {
+  return (
+    <kbd className="rounded-md bg-white/70 px-1.5 py-px font-sans text-[10px] font-bold text-[#3d3347]/80 shadow-[inset_0_-1px_0_rgba(61,51,71,0.18)] ring-1 ring-black/[0.06]">
+      {children}
+    </kbd>
+  );
+}
+
+function IconWithDot({ name, dot, size = 17 }: { name: IconName; dot?: boolean; size?: number }) {
+  return (
+    <span className="relative flex">
+      <Icon name={name} size={size} />
+      {dot && <span className="absolute -right-1 -top-1 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white" />}
+    </span>
+  );
+}
+
+function ToastPill({ toast, compact }: { toast: Toast; compact?: boolean }) {
+  return (
+    <div
+      className={`flex max-w-full items-center gap-1.5 rounded-full bg-[#3d3347]/90 font-semibold text-white shadow-lg backdrop-blur ${
+        compact ? "px-3 py-1 text-[11px]" : "animate-[floatUp_0.3s_ease-out] px-4 py-1.5 text-[12px]"
+      }`}
+    >
+      {isIconName(toast.icon) && <Icon name={toast.icon} size={compact ? 13 : 14} className="text-[#ffd166]" />}
+      <span className="truncate">{toast.text}</span>
     </div>
   );
 }
@@ -280,7 +287,7 @@ export default function Hud(p: Props) {
 // ─── mobile landscape HUD ───────────────────────────────────────────────────
 interface Tile {
   key: string;
-  icon: string;
+  icon: IconName;
   label: string;
   run: () => void;
   on?: boolean;
@@ -290,20 +297,14 @@ interface Tile {
   keepOpen?: boolean; // poke / high-five / react stay open for quick repeats
 }
 
-function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: number }) {
+function MobileHud(p: HudProps) {
   const ctx = p.context;
+  const { action, interaction } = p;
   const [menuOpen, setMenuOpen] = useState(false);
   const [view, setView] = useState<"grid" | "emoji">("grid");
   const clusterRef = useRef<HTMLDivElement>(null);
   const fs = useFullscreen();
   const [nudgeOpen, setNudgeOpen] = useState(() => !nudgeSeen());
-
-  // the one universal ACT button — same priority as desktop
-  const primary = primaryAction(
-    ctx,
-    { sitting: p.sitting, gameStatus: p.gameStatus },
-    { onSos: p.onSos, onToss: p.onToss, onOpenAddLink: p.onOpenAddLink, onRpsAct: p.onRpsAct, onToggleGame: p.onToggleGame, onSofaSit: p.onSofaSit }
-  );
 
   const showBallHint = ctx && !ctx.holdingBall && ctx.nearBall;
 
@@ -350,16 +351,15 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
   };
 
   const tiles: Tile[] = [
-    { key: "react", icon: "😊", label: "react", run: () => setView("emoji"), keepOpen: true },
-    { key: "poke", icon: "👉", label: "poke", run: p.onPoke, disabled: !p.nearName, keepOpen: true },
-    { key: "five", icon: "🙌", label: "high-5", run: p.onHighfive, disabled: !p.nearName, keepOpen: true },
-    { key: "tv", icon: "📺", label: p.tvOpen ? "hide tv" : "tv", run: p.onToggleTv, on: p.tvOpen },
-    { key: "sit", icon: "💺", label: p.sitting ? "stand" : "sit", run: p.onSit, on: p.sitting },
-    { key: "game", icon: "⭐", label: p.gameStatus === "playing" ? "playing!" : "game", run: p.onToggleGame, on: p.gameOpen },
-    { key: "rps", icon: "✊", label: "rps", run: p.onToggleRps, dot: p.rpsStatus === "picking" || p.rpsStatus === "revealing" },
+    { key: "react", icon: "react", label: "react", run: () => setView("emoji"), keepOpen: true },
+    { key: "poke", icon: "poke", label: "poke", run: p.onPoke, disabled: !p.nearName, keepOpen: true },
+    { key: "five", icon: "highFive", label: "high-5", run: p.onHighfive, disabled: !p.nearName, keepOpen: true },
+    { key: "tv", icon: "tv", label: p.tvOpen ? "hide tv" : "tv", run: p.onToggleTv, on: p.tvOpen },
+    { key: "sit", icon: "sit", label: p.sitting ? "stand" : "sit", run: p.onSit, on: p.sitting },
+    { key: "rps", icon: "rps", label: "rps", run: p.onToggleRps, dot: p.rpsStatus === "picking" || p.rpsStatus === "revealing" },
     {
       key: "voice",
-      icon: "🎙️",
+      icon: "voice",
       label: "voice",
       run: p.onToggleVoice,
       on: p.voiceOpen,
@@ -368,7 +368,7 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
     },
     {
       key: "chat",
-      icon: "💬",
+      icon: "chat",
       label: "chat",
       run: p.onToggleChat,
       on: p.chatOpen,
@@ -384,6 +384,10 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
     // lifted above the bottom panels only while the menu is open, so the
     // menu never tucks behind an open chat / tv panel
     <div className={`pointer-events-none absolute inset-0 ${menuOpen ? "z-30" : "z-20"}`}>
+      {/* in-world prompt sits under the joystick zone, so a thumb landing
+          on the stick can never trigger it by accident */}
+      <InteractPrompt action={action} interaction={interaction} showKey={false} />
+
       {/* ── compact top bar (notch-safe) ── */}
       <div className="absolute left-[calc(var(--safe-l)+0.5rem)] right-[calc(var(--safe-r)+0.5rem)] top-[calc(var(--safe-t)+0.5rem)] flex items-center justify-between gap-2">
         <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl bg-white/80 py-1.5 pl-2.5 pr-3 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
@@ -391,24 +395,35 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
             // eslint-disable-next-line @next/next/no-img-element
             <img src={p.photoUrl} alt="" className="h-6 w-6 rounded-lg object-cover" />
           ) : (
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff8fab] to-[#bdb2ff] text-xs">🏠</span>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff8fab] to-[#bdb2ff] text-white">
+              <Icon name="home" size={14} />
+            </span>
           )}
           <p className="truncate text-[12px] font-extrabold text-[#3d3347]">
             {p.roomName} <span className="font-semibold text-[#8a7f98]">· {p.count}</span>
           </p>
           {p.onSignOut && (
-            <button onClick={p.onSignOut} title="sign out" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[11px]">
-              ⏻
+            <button
+              onClick={p.onSignOut}
+              title="sign out"
+              aria-label="sign out"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[#4a3f55]"
+            >
+              <Icon name="signOut" size={12} />
             </button>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <div className="pointer-events-auto flex h-8 items-center gap-1 rounded-2xl bg-white/70 px-2 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
+          <div className="pointer-events-auto flex h-8 items-center gap-1 rounded-2xl bg-white/70 px-2 text-[#8a7f98] shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
             {p.others.slice(0, 5).map(([id, pl]) => (
               <span key={id} title={pl.name} className="block h-5 w-5 rounded-full ring-1 ring-black/10" style={{ background: pl.color }} />
             ))}
-            {p.others.length === 0 && <span className="px-0.5 text-[10px] font-semibold text-[#8a7f98]">just you</span>}
-            {p.simulated && <span className="pl-0.5 text-[10px]">🤖</span>}
+            {p.others.length === 0 && (
+              <span className="flex items-center gap-1 px-0.5 text-[10px] font-semibold">
+                <Icon name="user" size={11} /> just you
+              </span>
+            )}
+            {p.simulated && <Icon name="bot" size={13} label="demo bots" className="ml-0.5" />}
           </div>
           {(fs.active || fs.offer) && <FullscreenToggle active={fs.active} onClick={onFullscreenToggle} />}
         </div>
@@ -419,14 +434,12 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
         {nudgeOpen && fs.offer && !menuOpen && (
           <FullscreenNudge offer={fs.offer} onGo={goFullscreen} onDismiss={dismissNudge} />
         )}
-        {p.toasts.slice(-1).map((t, i) => (
-          <div key={`${t}-${i}`} className="max-w-full truncate rounded-full bg-[#3d3347]/90 px-3 py-1 text-[11px] font-semibold text-white shadow-lg">
-            {t}
-          </div>
+        {p.toasts.slice(-1).map((t) => (
+          <ToastPill key={t.id} toast={t} compact />
         ))}
         {showBallHint && (
-          <div className="animate-pop-in rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#4a3f55] shadow ring-1 ring-black/[0.06]">
-            step onto the ball to grab it ⚽
+          <div className="animate-pop-in flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#4a3f55] shadow ring-1 ring-black/[0.06]">
+            <Icon name="toss" size={13} /> step onto the ball to grab it
           </div>
         )}
       </div>
@@ -445,25 +458,34 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
           title="actions & social"
           aria-label={menuOpen ? "close menu" : "open menu"}
           aria-expanded={menuOpen}
-          className={`pointer-events-auto relative flex h-12 w-12 touch-manipulation items-center justify-center rounded-full text-lg font-black shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90 ${menuOpen ? "bg-[#3d3347] text-white" : "bg-white/90 text-[#4a3f55]"}`}
+          className={`pointer-events-auto relative flex h-12 w-12 touch-manipulation items-center justify-center rounded-full shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90 ${menuOpen ? "bg-[#3d3347] text-white" : "bg-white/90 text-[#4a3f55]"}`}
         >
-          <span className={`transition-transform duration-200 ${menuOpen ? "rotate-90" : ""}`}>{menuOpen ? "✕" : "⋯"}</span>
+          <span className={`flex transition-transform duration-200 ${menuOpen ? "rotate-90" : ""}`}>
+            <Icon name={menuOpen ? "close" : "menu"} size={20} />
+          </span>
           {!menuOpen && menuAlert && (
             <span className="absolute right-0.5 top-0.5 block h-3 w-3 rounded-full bg-[#ff3b3b] ring-2 ring-white" />
           )}
         </button>
 
         <div className="relative h-[76px] w-[76px]">
-          {primary ? (
+          {action ? (
             <button
-              key={primary.key}
-              onClick={primary.run}
-              style={{ boxShadow: `0 10px 28px -8px ${primary.glow}`, borderColor: primary.glow }}
-              className="animate-pop-in pointer-events-auto flex h-full w-full touch-manipulation flex-col items-center justify-center rounded-full border-2 bg-white/95 backdrop-blur transition-transform active:scale-90"
+              key={action.key}
+              {...interaction.bind}
+              onContextMenu={(e) => e.preventDefault()}
+              aria-label={action.prompt}
+              style={{ boxShadow: `0 10px 28px -8px ${action.glow}`, borderColor: action.glow }}
+              className="animate-pop-in pointer-events-auto relative flex h-full w-full touch-manipulation select-none items-center justify-center rounded-full border-2 bg-white/95 text-[#3d3347] backdrop-blur transition-transform [-webkit-touch-callout:none] active:scale-90"
             >
-              <span className="text-2xl leading-none">{primary.icon}</span>
-              <span className="mt-0.5 text-[10px] font-black uppercase tracking-widest text-[#3d3347]">act</span>
-              <span className="-mt-0.5 max-w-[64px] truncate text-[8px] font-bold uppercase tracking-wide text-[#8a7f98]">{primary.label}</span>
+              <span key={interaction.pulse} className={`flex flex-col items-center ${interaction.pulse ? "animate-act-press" : ""}`}>
+                <Icon name={action.icon} size={26} />
+                <span className="mt-1 text-[9px] font-black uppercase tracking-[0.16em]">act</span>
+                <span className="max-w-[62px] truncate text-[8px] font-bold uppercase tracking-wide text-[#8a7f98]">
+                  {action.hold && interaction.holding ? "hold…" : action.label}
+                </span>
+              </span>
+              {interaction.holding && <HoldRing glow={action.glow} width={6} />}
             </button>
           ) : (
             // resting ghost: marks where contextual actions will appear
@@ -476,16 +498,22 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
             `invisible` when closed: visibility:hidden is never hit-testable. */}
         <div
           role="menu"
-          className={`absolute bottom-0 right-[calc(100%+0.75rem)] flex max-h-[calc(100dvh-var(--safe-t)-var(--safe-b)-7.5rem)] w-[13.25rem] origin-bottom-right flex-col rounded-[20px] bg-white/95 shadow-2xl ring-1 ring-black/[0.08] backdrop-blur transition-all duration-200 ${menuOpen ? "pointer-events-auto visible translate-x-0 scale-100 opacity-100" : "pointer-events-none invisible translate-x-2 scale-95 opacity-0"}`}
+          className={`absolute bottom-0 right-[calc(100%+0.75rem)] flex max-h-[calc(100dvh-var(--safe-t)-var(--safe-b)-7.5rem)] w-[15.5rem] origin-bottom-right flex-col rounded-[20px] bg-white/95 shadow-2xl ring-1 ring-black/[0.08] backdrop-blur transition-all duration-200 ${menuOpen ? "pointer-events-auto visible translate-x-0 scale-100 opacity-100" : "pointer-events-none invisible translate-x-2 scale-95 opacity-0"}`}
         >
           {/* block (not flex) scroller: children overflow and scroll instead of squashing */}
           <div className="min-h-0 overflow-y-auto overscroll-contain p-2 [scrollbar-width:thin]">
             {view === "grid" ? (
               <>
-                <p className={`truncate px-1 pb-1.5 ${label}`}>
-                  {p.nearName ? `✋ near ${p.nearName.slice(0, 12)}` : "walk up to a friend to poke"}
+                <p className={`flex items-center gap-1 truncate px-1 pb-1.5 ${label}`}>
+                  {p.nearName ? (
+                    <>
+                      <Icon name="wave" size={11} /> near {p.nearName.slice(0, 12)}
+                    </>
+                  ) : (
+                    "walk up to a friend to poke"
+                  )}
                 </p>
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-4 gap-1">
                   {tiles.map((t) => (
                     <button
                       key={t.key}
@@ -497,7 +525,7 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
                       }}
                       className={`relative flex h-[52px] touch-manipulation flex-col items-center justify-center gap-1 rounded-2xl text-[10px] font-bold leading-none transition-all active:scale-90 disabled:opacity-35 ${t.on ? "bg-[#3d3347] text-white" : "bg-[#3d3347]/[0.05] text-[#4a3f55]"}`}
                     >
-                      <span className="text-[19px] leading-none">{t.icon}</span>
+                      <Icon name={t.icon} size={20} />
                       <span className="max-w-full truncate px-0.5">{t.label}</span>
                       {t.badge ? (
                         <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff3b3b] px-1 text-[9px] font-black text-white ring-2 ring-white">
@@ -515,9 +543,9 @@ function MobileHud(p: Props & { others: Array<[string, PlayerState]>; count: num
                 <div className="flex items-center justify-between pb-1.5">
                   <button
                     onClick={() => setView("grid")}
-                    className="flex h-7 touch-manipulation items-center gap-1 rounded-full bg-[#3d3347]/[0.06] pl-2 pr-2.5 text-[11px] font-bold text-[#4a3f55] active:scale-95"
+                    className="flex h-7 touch-manipulation items-center gap-0.5 rounded-full bg-[#3d3347]/[0.06] pl-1.5 pr-2.5 text-[11px] font-bold text-[#4a3f55] active:scale-95"
                   >
-                    ‹ back
+                    <Icon name="back" size={13} /> back
                   </button>
                   <p className={`pr-1 ${label}`}>react</p>
                 </div>

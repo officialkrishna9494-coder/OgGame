@@ -20,7 +20,30 @@ export interface HallSnapshot {
   game: GameState;
   rps: RpsState;
   sos: SosState | null;
-  toasts: string[];
+  toasts: Toast[];
+}
+
+/** A HUD notification. `icon` is an icon name from components/icons. */
+export interface Toast {
+  id: number;
+  text: string;
+  icon?: string;
+}
+
+let toastSeq = 0;
+
+// Toasts arrive as { text, icon }. A plain string is an older server build —
+// strip its emoji so the HUD stays consistent with the icon set.
+function toToast(payload: unknown): { text: string; icon?: string } | null {
+  if (typeof payload === "string") {
+    const text = payload.replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, "").replace(/\s{2,}/g, " ").trim();
+    return text ? { text } : null;
+  }
+  if (payload && typeof payload === "object" && typeof (payload as { text?: unknown }).text === "string") {
+    const { text, icon } = payload as { text: string; icon?: unknown };
+    return { text, icon: typeof icon === "string" ? icon : undefined };
+  }
+  return null;
 }
 
 interface JoinInfo {
@@ -70,10 +93,11 @@ export function useHallSocket(me: JoinInfo | null) {
   const ballRef = useRef<BallState>({ x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null });
   const tvRef = useRef<TvState>({ playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: 0 });
 
-  const pushToast = useCallback((text: string) => {
-    setSnapshot((s) => ({ ...s, toasts: [...s.toasts.slice(-2), text] }));
+  const pushToast = useCallback((text: string, icon?: string) => {
+    const id = ++toastSeq;
+    setSnapshot((s) => ({ ...s, toasts: [...s.toasts.slice(-2), { id, text, icon }] }));
     window.setTimeout(() => {
-      setSnapshot((s) => ({ ...s, toasts: s.toasts.slice(1) }));
+      setSnapshot((s) => ({ ...s, toasts: s.toasts.filter((t) => t.id !== id) }));
     }, 3200);
   }, []);
 
@@ -145,7 +169,10 @@ export function useHallSocket(me: JoinInfo | null) {
         sos,
       }));
     });
-    socket.on("hall:toast", (text: string) => pushToast(text));
+    socket.on("hall:toast", (payload: unknown) => {
+      const t = toToast(payload);
+      if (t) pushToast(t.text, t.icon);
+    });
 
     return () => {
       dead = true;
@@ -218,7 +245,7 @@ export function useHallSocket(me: JoinInfo | null) {
       emit(kind === "poke" ? "hall:poke" : "hall:highfive", { targetId: targetId ?? null });
       if (kind === "poke" && targetId) {
         const target = remoteRef.current[targetId] ?? snapshot.players[targetId];
-        pushToast(`you poked ${target?.name ?? "a friend"} 👉`);
+        pushToast(`you poked ${target?.name ?? "a friend"}`, "poke");
       }
       setSnapshot((s) => ({ ...s, players: { ...s.players, [p.id]: p } }));
       window.setTimeout(() => {

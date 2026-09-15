@@ -14,8 +14,8 @@ export function cloudinaryConfigured(): boolean {
 const MAX_BYTES = 8 * 1024 * 1024;
 
 export async function uploadImage(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) throw new Error("that file isn't an image 🖼️");
-  if (file.size > MAX_BYTES) throw new Error("keep it under 8 MB, please 🐭");
+  if (!file.type.startsWith("image/")) throw new Error("that file isn't an image");
+  if (file.size > MAX_BYTES) throw new Error("keep it under 8 MB, please");
   const cloud = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!;
   const preset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!;
   const form = new FormData();
@@ -26,8 +26,8 @@ export async function uploadImage(file: File): Promise<string> {
     method: "POST",
     body: form,
   });
-  if (!res.ok) throw new Error("upload failed — check the preset is Unsigned 🌧️");
+  if (!res.ok) throw new Error("upload failed — check the preset is Unsigned");
   const json = (await res.json()) as { secure_url?: string };
-  if (!json.secure_url) throw new Error("upload failed — no URL came back 🌧️");
+  if (!json.secure_url) throw new Error("upload failed — no URL came back");
   return json.secure_url;
 }

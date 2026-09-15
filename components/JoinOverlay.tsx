@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AVATAR_COLORS } from "../lib/hall-types";
+import { Icon } from "./icons";
 
 interface Props {
   roomName: string;
@@ -62,14 +63,14 @@ export default function JoinOverlay({ roomName, tagline, onJoin }: Props) {
         <button
           disabled={!name.trim()}
           onClick={() => onJoin(name.trim().slice(0, 14), color)}
-          className="mt-5 w-full rounded-2xl bg-[#3d3347] py-3.5 text-[15px] font-bold text-white shadow-lg transition-all hover:bg-[#2e2735] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30"
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3.5 text-[15px] font-bold text-white shadow-lg transition-all hover:bg-[#2e2735] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30"
         >
-          step inside ✨
+          step inside <Icon name="arrowRight" size={17} />
         </button>
         <p className="mt-3 text-[11px] leading-relaxed text-[#a99cbb]">
-          WASD / arrows to wander · space to hop
+          WASD / arrows to wander · space to hop · E to interact
           <br />
-          drag on mobile to move
+          on mobile: joystick to move, ACT to interact
         </p>
       </div>
     </div>

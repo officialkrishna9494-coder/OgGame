@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Icon } from "../../components/icons";
 import { DEFAULT_ROOM, NEXT_FRAME_SLOT } from "../../lib/room-defaults";
 import { loadRoom, saveRoom, stampRoom } from "../../lib/room-store";
 import { AUTH_MODE } from "../../lib/auth";
@@ -24,7 +25,7 @@ function describeSaveError(ex: unknown): string {
     return "Couldn't reach Firestore (network). Changes are kept on this device only for now.";
   }
   if (code === "not-found") {
-    return "Firestore database not found — create it in the Firebase Console first (Build → Firestore Database).";
+    return "Firestore database not found — create it in the Firebase Console first (Build › Firestore Database).";
   }
   return `Couldn't save to Firestore (${code || "unknown error"}). Changes are kept on this device only for now.`;
 }
@@ -68,7 +69,7 @@ export default function AdminPage() {
       setRoom(loadRoom());
       setUnlocked(true);
     } else {
-      alert("hmm, that's not the room code 🌙");
+      alert("hmm, that's not the room code");
     }
   };
 
@@ -89,7 +90,9 @@ export default function AdminPage() {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[#f6efe6] p-4">
         <div className="w-full max-w-xs rounded-[24px] border border-white/70 bg-white/90 p-6 text-center shadow-xl">
-          <p className="text-3xl">🔐</p>
+          <div className="flex justify-center text-[#3d3347]">
+            <Icon name="lock" size={32} />
+          </div>
           <h1 className="mt-2 text-xl font-extrabold text-[#3d3347]">room setup</h1>
           <p className="mt-1 text-[12px] text-[#8a7f98]">
             for the host only · default code <code className="rounded bg-black/[0.06] px-1.5 py-0.5 font-mono">cozy123</code>
@@ -106,8 +109,8 @@ export default function AdminPage() {
           <button onClick={unlock} className="mt-3 w-full rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white hover:bg-[#2e2735]">
             unlock
           </button>
-          <Link href="/" className="mt-3 inline-block text-[12px] font-semibold text-[#a08fb5] hover:text-[#3d3347]">
-            ← back to the hall
+          <Link href="/" className="mt-3 inline-flex items-center gap-1 text-[12px] font-semibold text-[#a08fb5] hover:text-[#3d3347]">
+            <Icon name="arrowLeft" size={13} /> back to the hall
           </Link>
         </div>
       </main>
@@ -124,20 +127,24 @@ export default function AdminPage() {
             <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#a08fb5]">cozy hall · admin</p>
             <h1 className="text-2xl font-extrabold text-[#3d3347]">room setup</h1>
           </div>
-          <Link href="/" className="rounded-full bg-[#3d3347] px-4 py-2 text-[12px] font-bold text-white hover:bg-[#2e2735]">
-            ← hall
+          <Link href="/" className="flex items-center gap-1.5 rounded-full bg-[#3d3347] px-4 py-2 text-[12px] font-bold text-white hover:bg-[#2e2735]">
+            <Icon name="arrowLeft" size={14} /> hall
           </Link>
         </div>
 
         {saveError && (
-          <p className="mt-3 rounded-2xl bg-[#ffe4e4] px-4 py-2.5 text-[12px] font-semibold leading-relaxed text-[#b03939]">
-            ⚠️ {saveError}
+          <p className="mt-3 flex gap-2 rounded-2xl bg-[#ffe4e4] px-4 py-2.5 text-[12px] font-semibold leading-relaxed text-[#b03939]">
+            <Icon name="warning" size={15} className="mt-px" />
+            <span>{saveError}</span>
           </p>
         )}
         {dbConfigured() && checkedAuth && !signedInAs && (
-          <p className="mt-3 rounded-2xl bg-[#fff3d6] px-4 py-2.5 text-[12px] font-semibold leading-relaxed text-[#7a5b00]">
-            👤 You&apos;re not signed in on this browser — open <Link href="/" className="underline">the hall</Link> once
-            and log in with Google, then edits here will sync to friends.
+          <p className="mt-3 flex gap-2 rounded-2xl bg-[#fff3d6] px-4 py-2.5 text-[12px] font-semibold leading-relaxed text-[#7a5b00]">
+            <Icon name="user" size={15} className="mt-px" />
+            <span>
+              You&apos;re not signed in on this browser — open <Link href="/" className="underline">the hall</Link> once
+              and log in with Google, then edits here will sync to friends.
+            </span>
           </p>
         )}
 
@@ -215,9 +222,9 @@ export default function AdminPage() {
                   ],
                 })
               }
-              className="rounded-full bg-[#efe8f7] px-3 py-1 text-[12px] font-bold text-[#4a3f55] hover:bg-[#e2d6f2]"
+              className="flex items-center gap-1 rounded-full bg-[#efe8f7] px-3 py-1 text-[12px] font-bold text-[#4a3f55] hover:bg-[#e2d6f2]"
             >
-              + add
+              <Icon name="plus" size={13} /> add
             </button>
           </div>
           <div className="mt-3 grid gap-3">
@@ -229,10 +236,10 @@ export default function AdminPage() {
                     <img src={f.imageUrl} alt="" className="h-16 w-16 rounded-xl object-cover ring-1 ring-black/10" />
                   ) : (
                     <span
-                      className="flex h-16 w-16 items-center justify-center rounded-xl text-xl ring-1 ring-black/10"
+                      className="flex h-16 w-16 items-center justify-center rounded-xl text-white ring-1 ring-black/10"
                       style={{ background: `linear-gradient(135deg, hsl(${f.hue},70%,78%), hsl(${(f.hue + 50) % 360},65%,62%))` }}
                     >
-                      🖼️
+                      <Icon name="image" size={24} />
                     </span>
                   )}
                 </div>
@@ -308,8 +315,8 @@ export default function AdminPage() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={poster.imageUrl} alt="" className="h-16 w-16 rounded-xl object-cover ring-1 ring-black/10" />
                   ) : (
-                    <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-white text-xl ring-1 ring-black/10">
-                      📜
+                    <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-white text-[#a08fb5] ring-1 ring-black/10">
+                      <Icon name="scroll" size={24} />
                     </span>
                   )}
                 </div>
@@ -379,9 +386,10 @@ export default function AdminPage() {
                 />
                 <button
                   onClick={() => patch({ tv: room.tv.filter((_, j) => j !== i) })}
-                  className="shrink-0 rounded-xl bg-[#ffe4e4] px-2.5 py-2 text-[12px] font-bold text-[#b03939]"
+                  aria-label={`remove ${v.title}`}
+                  className="flex shrink-0 items-center justify-center rounded-xl bg-[#ffe4e4] px-2.5 py-2 text-[#b03939]"
                 >
-                  ✕
+                  <Icon name="close" size={14} />
                 </button>
               </div>
             ))}
@@ -397,10 +405,12 @@ export default function AdminPage() {
         >
           reset room to defaults
         </button>
-        <p className="mt-3 text-center text-[11px] text-[#a99cbb]">
+        <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] text-[#a99cbb]">
+          <Icon name={dbConfigured() ? "cloud" : "disk"} size={13} />
           {dbConfigured()
-            ? "☁️ saving to Firestore rooms/cozy-hall — every friend sees edits live"
-            : "💾 saving locally — add Firebase vars to sync across friends"} · presence stays on sockets
+            ? "saving to Firestore rooms/cozy-hall — every friend sees edits live"
+            : "saving locally — add Firebase vars to sync across friends"}{" "}
+          · presence stays on sockets
         </p>
       </div>
     </main>
@@ -420,12 +430,18 @@ function UploadButton({ onUrl }: { onUrl: (url: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   if (!cloudinaryConfigured()) {
-    return <span className="text-[11px] font-medium text-[#a99cbb]">add Cloudinary keys for uploads ↑</span>;
+    return <span className="text-[11px] font-medium text-[#a99cbb]">add Cloudinary keys for uploads (see status above)</span>;
   }
   return (
     <span className="inline-flex flex-col gap-1">
-      <label className="cursor-pointer rounded-lg bg-[#efe8f7] px-2.5 py-1.5 text-[11px] font-bold text-[#4a3f55] transition-colors hover:bg-[#e2d6f2]">
-        {busy ? "uploading…" : "📤 upload photo"}
+      <label className="flex cursor-pointer items-center gap-1 rounded-lg bg-[#efe8f7] px-2.5 py-1.5 text-[11px] font-bold text-[#4a3f55] transition-colors hover:bg-[#e2d6f2]">
+        {busy ? (
+          "uploading…"
+        ) : (
+          <>
+            <Icon name="upload" size={13} /> upload photo
+          </>
+        )}
         <input
           type="file"
           accept="image/*"
@@ -462,8 +478,8 @@ function AddVideo({ onAdd }: { onAdd: (id: string, title: string) => void }) {
   return (
     <div className="mt-2 flex gap-2">
       <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder="paste a youtube link…" className="w-full rounded-xl border border-[#e8dcc8] bg-white px-3 py-2 text-[13px] outline-none focus:border-[#ff8fab]" />
-      <button onClick={add} className="shrink-0 rounded-xl bg-[#3d3347] px-4 text-[13px] font-bold text-white">
-        + add
+      <button onClick={add} className="flex shrink-0 items-center gap-1 rounded-xl bg-[#3d3347] px-4 text-[13px] font-bold text-white">
+        <Icon name="plus" size={14} /> add
       </button>
     </div>
   );

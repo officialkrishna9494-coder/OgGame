@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const apiSecret = process.env.LIVEKIT_API_SECRET;
 
   if (!wsUrl || !apiKey || !apiSecret) {
-    return NextResponse.json({ error: "voice not configured on this server 🎙️" }, { status: 503 });
+    return NextResponse.json({ error: "voice not configured on this server" }, { status: 503 });
   }
 
   let body: { identity?: unknown; name?: unknown };

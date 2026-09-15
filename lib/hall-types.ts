@@ -171,12 +171,6 @@ export type RpsChoice = "rock" | "paper" | "scissors";
 
 export const RPS_CHOICES: RpsChoice[] = ["rock", "paper", "scissors"];
 
-export const RPS_EMOJI: Record<RpsChoice, string> = {
-  rock: "✊",
-  paper: "✋",
-  scissors: "✌️",
-};
-
 export function rpsBeats(a: RpsChoice, b: RpsChoice): boolean {
   return (
     (a === "rock" && b === "scissors") ||

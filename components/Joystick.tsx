@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { joyState, resetJoy } from "../lib/joy-state";
+import { Icon } from "./icons";
 
 const BASE = 116; // ring diameter (px)
 const KNOB = 54; // knob diameter (px)
@@ -131,10 +132,10 @@ export default function Joystick() {
         >
           {/* inner guide ring + direction ticks */}
           <span className="absolute inset-[18px] rounded-full ring-1 ring-white/35" />
-          <span className="absolute left-1/2 top-1 -ml-[4px] text-[8px] leading-none text-white/75">▲</span>
-          <span className="absolute bottom-1 left-1/2 -ml-[4px] text-[8px] leading-none text-white/75">▼</span>
-          <span className="absolute left-1.5 top-1/2 -mt-[5px] text-[8px] leading-none text-white/75">◀</span>
-          <span className="absolute right-1.5 top-1/2 -mt-[5px] text-[8px] leading-none text-white/75">▶</span>
+          <Icon name="caretUp" size={11} className="absolute left-1/2 top-1 -ml-[5.5px] text-white/80" />
+          <Icon name="caretDown" size={11} className="absolute bottom-1 left-1/2 -ml-[5.5px] text-white/80" />
+          <Icon name="caretLeft" size={11} className="absolute left-1 top-1/2 -mt-[5.5px] text-white/80" />
+          <Icon name="caretRight" size={11} className="absolute right-1 top-1/2 -mt-[5.5px] text-white/80" />
 
           <div
             ref={knobRef}

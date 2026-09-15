@@ -126,7 +126,7 @@ export function useVoice(who: Who | null) {
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "voice server said no 🌧️");
+        throw new Error(data.error ?? "voice server said no");
       }
       const { token, url } = (await res.json()) as { token: string; url: string };
 
@@ -195,7 +195,7 @@ export function useVoice(who: Who | null) {
       setPeers([]);
       setStatus("error");
       setError(
-        e instanceof Error ? e.message : "couldn't join voice — check mic permission 🎙️"
+        e instanceof Error ? e.message : "couldn't join voice — check mic permission"
       );
     }
   }, [detachAll, leave, snapshotPeers]);

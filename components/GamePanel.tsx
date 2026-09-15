@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import type { GameState } from "../lib/hall-types";
 import { GAME_DURATION_MS } from "../lib/hall-types";
+import { Icon } from "./icons";
 
 interface Props {
   game: GameState;
@@ -41,8 +42,8 @@ export default function GamePanel({ game, compact, onStart, onClose }: Props) {
       }`}
     >
       <div className="flex items-center justify-between bg-gradient-to-r from-[#ffb703] to-[#ff8fab] px-4 py-2.5 text-white">
-        <p className="text-[13px] font-bold">
-          ⭐ star scramble{" "}
+        <p className="flex items-center gap-1.5 text-[13px] font-bold">
+          <Icon name="starGame" size={16} /> star scramble{" "}
           {game.status === "playing" ? `· ${remaining}s` : game.status === "ended" ? "· results" : ""}
         </p>
         <button onClick={onClose} className="rounded-full bg-white/20 px-2.5 py-0.5 text-[12px] font-bold hover:bg-white/30">
@@ -54,13 +55,13 @@ export default function GamePanel({ game, compact, onStart, onClose }: Props) {
         {game.status === "idle" && (
           <>
             <p className="text-[13px] leading-relaxed text-[#4a3f55]">
-              Golden stars rain onto the rug for <b>60 seconds</b>. Walk over them to grab them — most stars wins. 🏆
+              Golden stars rain onto the rug for <b>60 seconds</b>. Walk over them to grab them — most stars wins.
             </p>
             <button
               onClick={onStart}
-              className="mt-3 w-full rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white shadow-lg transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white shadow-lg transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
             >
-              start the scramble ⭐
+              <Icon name="starGame" size={17} /> start the scramble
             </button>
           </>
         )}
@@ -68,8 +69,12 @@ export default function GamePanel({ game, compact, onStart, onClose }: Props) {
         {game.status === "playing" && (
           <>
             <div className="flex items-center justify-between">
-              <p className="text-2xl font-black tabular-nums text-[#3d3347]">{remaining}s</p>
-              <p className="text-[12px] font-bold text-[#8a7f98]">{game.stars.length} stars out</p>
+              <p className="flex items-center gap-1.5 text-2xl font-black tabular-nums text-[#3d3347]">
+                <Icon name="timer" size={22} /> {remaining}s
+              </p>
+              <p className="flex items-center gap-1 text-[12px] font-bold text-[#8a7f98]">
+                <Icon name="starGame" size={13} /> {game.stars.length} out
+              </p>
             </div>
             <div className="mt-1 h-2 overflow-hidden rounded-full bg-black/[0.07]">
               <div
@@ -83,15 +88,23 @@ export default function GamePanel({ game, compact, onStart, onClose }: Props) {
 
         {game.status === "ended" && (
           <>
-            <p className="text-center text-[15px] font-extrabold text-[#3d3347]">
-              {game.winner ? `🏆 ${game.winner} takes it!` : "no stars this time 🌙"}
+            <p className="flex items-center justify-center gap-1.5 text-center text-[15px] font-extrabold text-[#3d3347]">
+              {game.winner ? (
+                <>
+                  <Icon name="trophy" size={18} className="text-[#e0a100]" /> {game.winner} takes it!
+                </>
+              ) : (
+                <>
+                  <Icon name="moon" size={17} /> no stars this time
+                </>
+              )}
             </p>
             <Leaderboard leaders={leaders} />
             <button
               onClick={onStart}
-              className="mt-3 w-full rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
             >
-              run it back ↻
+              <Icon name="again" size={16} /> run it back
             </button>
           </>
         )}
@@ -100,8 +113,10 @@ export default function GamePanel({ game, compact, onStart, onClose }: Props) {
   );
 }
 
+const MEDALS = ["#e0a100", "#9aa3b5", "#c07a45"]; // gold · silver · bronze
+
 function Leaderboard({ leaders }: { leaders: Array<{ name: string; points: number }> }) {
-  if (!leaders.length) return <p className="mt-2 text-[12px] font-medium text-[#a99cbb]">no scores yet — go touch a star ✨</p>;
+  if (!leaders.length) return <p className="mt-2 text-[12px] font-medium text-[#a99cbb]">no scores yet — go touch a star</p>;
   return (
     <div className="mt-2 flex flex-col gap-1">
       {leaders.map((s, i) => (
@@ -109,9 +124,13 @@ function Leaderboard({ leaders }: { leaders: Array<{ name: string; points: numbe
           key={`${s.name}-${i}`}
           className={`flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-[13px] ${i === 0 ? "bg-[#fff3d6] font-extrabold text-[#7a5b00]" : "bg-black/[0.03] font-semibold text-[#4a3f55]"}`}
         >
-          <span className="w-5 text-center">{["🥇", "🥈", "🥉", "4.", "5."][i]}</span>
+          <span className="flex w-5 justify-center">
+            {i < 3 ? <Icon name="medal" size={16} label={`#${i + 1}`} style={{ color: MEDALS[i] }} /> : <span className="text-[12px] font-bold text-[#a99cbb]">{i + 1}</span>}
+          </span>
           <span className="flex-1 truncate">{s.name}</span>
-          <span className="tabular-nums">{s.points} ⭐</span>
+          <span className="flex items-center gap-1 tabular-nums">
+            {s.points} <Icon name="starGame" size={13} />
+          </span>
         </div>
       ))}
     </div>

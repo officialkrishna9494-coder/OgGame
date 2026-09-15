@@ -17,6 +17,7 @@ import Hud from "../components/Hud";
 import RotatePrompt from "../components/RotatePrompt";
 import TvPanel from "../components/TvPanel";
 import VoicePanel from "../components/VoicePanel";
+import { Icon } from "../components/icons";
 import { hallToss } from "../components/HallScene";
 import { useRoom } from "../lib/room-store";
 import { useChat } from "../lib/useChat";
@@ -34,7 +35,8 @@ const HallScene = dynamic(() => import("../components/HallScene"), { ssr: false 
 function HallClient({ me }: { me: Identity }) {
   const { room, updateRoom } = useRoom();
   const [tvOpen, setTvOpen] = useState(false);
-  const [gameOpen, setGameOpen] = useState(false);
+  // endsAt of the star-scramble round this player hid (0 = none hidden)
+  const [gameHiddenRound, setGameHiddenRound] = useState(0);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [rpsOpen, setRpsOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -119,6 +121,15 @@ function HallClient({ me }: { me: Identity }) {
   const handleHit = useCallback(() => socket.sendHit(), [socket]);
   const handleSofaSit = useCallback(() => socket.sendAction("sit", null, { seatMode: "sofa" }), [socket]);
   const handleSos = useCallback(() => socket.raiseSos(), [socket]);
+  // ACT / E at the rug starts the round itself — the server is the referee,
+  // so there's nothing to start while offline
+  const handleStartGame = useCallback(() => {
+    if (simulated) {
+      socket.pushToast("star scramble needs the live hall server", "offline");
+      return;
+    }
+    socket.startGame();
+  }, [socket, simulated]);
   const toggleChat = useCallback(() => {
     setChatOpen((v) => !v);
     setChatSeenAt(Date.now());
@@ -131,32 +142,40 @@ function HallClient({ me }: { me: Identity }) {
     },
     [chat, socket, me.name, me.color]
   );
-  // ACT at the RPS table: idle → throw a challenge + open the panel,
-  // otherwise just open the panel (join / pick / spectate from there).
+  // ACT / E at the RPS table: idle → throw a challenge; someone else is
+  // waiting → accept it (what the table and panel promise). Always open the
+  // panel so you can pick / spectate from there.
   const handleRpsAct = useCallback(() => {
-    if (socket.snapshot.rps.status === "idle") socket.challengeRps();
+    const r = socket.snapshot.rps;
+    const acceptable = r.status === "waiting" && !!r.seats.a && r.seats.a !== mySocketId && !r.seats.b;
+    if (r.status === "idle" || acceptable) socket.challengeRps();
     setRpsOpen(true);
-  }, [socket]);
+  }, [socket, mySocketId]);
 
   // anyone near the TV can put ONE link on the shared shelf (synced via room)
   const handleAddVideo = useCallback(
     (videoId: string, title: string) => {
       setLinkOpen(false);
       if (room.tv.length >= 30) {
-        socket.pushToast("the shelf is full (30) — remove one from /admin 📺");
+        socket.pushToast("the shelf is full (30) — remove one from /admin", "warning");
         return;
       }
       if (room.tv.some((v) => v.id === videoId)) {
-        socket.pushToast("that's already on the shelf 😉");
+        socket.pushToast("that's already on the shelf", "info");
         return;
       }
       updateRoom(stampRoom({ ...room, tv: [...room.tv, { id: videoId, title }] }));
-      socket.pushToast(`📺 ${me.name} added “${title.slice(0, 30)}”`);
+      socket.pushToast(`${me.name} added “${title.slice(0, 30)}”`, "tv");
     },
     [room, updateRoom, socket, me.name]
   );
 
   const sitting = players["me"]?.sitting ?? false;
+  // the scramble panel is a live scoreboard: it opens for everyone while a
+  // round runs and through its results, unless this player hid that round
+  const gameLive = game.status === "playing" || game.status === "ended";
+  const showGame = gameLive && gameHiddenRound !== game.endsAt;
+  const rpsSeat = !mySocketId ? null : rps.seats.a === mySocketId ? "a" : rps.seats.b === mySocketId ? "b" : null;
 
   return (
     <main className="relative h-dvh w-full touch-manipulation overflow-hidden bg-[#f6efe6] font-[var(--font-geist-sans),system-ui,sans-serif]">
@@ -195,8 +214,8 @@ function HallClient({ me }: { me: Identity }) {
         mobile={mobile}
         context={context}
         gameStatus={game.status}
-        gameOpen={gameOpen}
         rpsStatus={rps.status}
+        rpsSeat={rpsSeat}
         unreadCount={unreadCount || undefined}
         chatOpen={chatOpen}
         voiceStatus={voice.status}
@@ -210,7 +229,7 @@ function HallClient({ me }: { me: Identity }) {
         onSofaSit={handleSofaSit}
         onToss={() => hallToss.fn?.()}
         onToggleTv={() => setTvOpen((v) => !v)}
-        onToggleGame={() => setGameOpen((v) => !v)}
+        onStartGame={handleStartGame}
         onToggleVoice={() => setVoiceOpen((v) => !v)}
         onToggleRps={() => setRpsOpen((v) => !v)}
         onRpsAct={handleRpsAct}
@@ -219,8 +238,8 @@ function HallClient({ me }: { me: Identity }) {
         onOpenAddLink={() => setLinkOpen(true)}
       />
 
-      {gameOpen && (
-        <GamePanel game={game} compact={mobile} onStart={socket.startGame} onClose={() => setGameOpen(false)} />
+      {showGame && (
+        <GamePanel game={game} compact={mobile} onStart={handleStartGame} onClose={() => setGameHiddenRound(game.endsAt)} />
       )}
 
       {rpsOpen && (
@@ -269,9 +288,9 @@ function HallClient({ me }: { me: Identity }) {
       {!mobile && (
         <a
           href="/admin"
-          className="absolute bottom-2 right-3 z-20 text-[10px] font-semibold text-[#3d3347]/30 hover:text-[#3d3347]/70"
+          className="absolute bottom-2 right-3 z-20 flex items-center gap-1 text-[10px] font-semibold text-[#3d3347]/30 hover:text-[#3d3347]/70"
         >
-          room setup →
+          room setup <Icon name="arrowRight" size={10} />
         </a>
       )}
     </main>

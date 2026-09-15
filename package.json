@@ -11,6 +11,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@types/three": "^0.186.0",
     "firebase": "^12.19.0",
     "livekit-client": "^2.22.3",
