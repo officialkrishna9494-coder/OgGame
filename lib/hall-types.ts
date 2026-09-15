@@ -22,6 +22,8 @@ export interface PlayerState {
   action?: "poke" | "highfive" | "wave" | null;
   actionAt?: number;
   actionTarget?: string | null;
+  // dodgeball bonk: victim flashes red + does a stunt while fresh
+  hitAt?: number;
 }
 
 export interface BallState {
@@ -32,6 +34,9 @@ export interface BallState {
   vy: number;
   vz: number;
   holderId: string | null;
+  // dodgeball: who threw it last (socket id, or "me" pre-relay) + when
+  throwerId?: string | null;
+  thrownAt?: number;
 }
 
 export interface MemoryFrame {

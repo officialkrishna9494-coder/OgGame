@@ -13,6 +13,7 @@ import { IDLE_GAME, type BallState, type GameState, type PlayerState, type TvSta
 export interface HallSnapshot {
   connected: boolean;
   simulated: boolean;
+  mySocketId: string;
   players: Record<string, PlayerState>;
   ball: BallState;
   tv: TvState;
@@ -51,6 +52,7 @@ export function useHallSocket(me: JoinInfo | null) {
   const [snapshot, setSnapshot] = useState<HallSnapshot>({
     connected: false,
     simulated: true,
+    mySocketId: "",
     players: {},
     ball: { x: 3.5, z: 1.0, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null },
     tv: { playlist: [], index: 0, playing: false, updatedAt: 0 },
@@ -112,7 +114,7 @@ export function useHallSocket(me: JoinInfo | null) {
     socket.on("connect", () => {
       window.clearTimeout(timer);
       if (dead) return;
-      setSnapshot((s) => ({ ...s, connected: true, simulated: false }));
+      setSnapshot((s) => ({ ...s, connected: true, simulated: false, mySocketId: socket.id ?? "" }));
       socket.emit("hall:join", { name: me?.name ?? "Friend", color: me?.color ?? "#ffb3c7" });
     });
     socket.on("connect_error", failToBots);
@@ -256,6 +258,10 @@ export function useHallSocket(me: JoinInfo | null) {
     emit("game:start", {});
   }, [emit]);
 
+  const sendHit = useCallback(() => {
+    emit("hall:hit", {});
+  }, [emit]);
+
   const collectStar = useCallback(
     (starId: string) => {
       emit("game:collect", { starId });
@@ -275,6 +281,7 @@ export function useHallSocket(me: JoinInfo | null) {
     setBall,
     tvControl,
     startGame,
+    sendHit,
     collectStar,
     pushToast,
   };

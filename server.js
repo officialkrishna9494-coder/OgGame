@@ -152,6 +152,7 @@ app.prepare().then(() => {
         action: players.get(socket.id)?.action,
         actionAt: players.get(socket.id)?.actionAt,
         actionTarget: players.get(socket.id)?.actionTarget ?? null,
+        hitAt: players.get(socket.id)?.hitAt,
       });
       dirty = true;
     });
@@ -195,6 +196,21 @@ app.prepare().then(() => {
       dirty = true;
     });
 
+    // dodgeball bonk — victim self-reports, server rate-limits + announces
+    socket.on("hall:hit", () => {
+      const cur = players.get(socket.id);
+      if (!cur) return;
+      if (cur.hitAt && Date.now() - cur.hitAt < 2000) return;
+      players.set(socket.id, { ...cur, hitAt: Date.now() });
+      const thrower = ball.throwerId ? players.get(ball.throwerId) : null;
+      const freshThrow = ball.thrownAt && Date.now() - ball.thrownAt < 6000;
+      io.to("hall").emit(
+        "hall:toast",
+        thrower && freshThrow ? `💥 ${thrower.name} bonked ${cur.name}!` : `💥 ${cur.name} got bonked!`
+      );
+      dirty = true;
+    });
+
     socket.on("hall:ball", (b) => {
       ball = {
         x: Number(b.x) || 0,
@@ -204,9 +220,12 @@ app.prepare().then(() => {
         vy: Number(b.vy) || 0,
         vz: Number(b.vz) || 0,
         holderId: b.holderId === null || b.holderId === undefined ? null : String(b.holderId),
+        throwerId: b.throwerId === null || b.throwerId === undefined ? null : String(b.throwerId),
+        thrownAt: Number(b.thrownAt) || 0,
       };
-      // translate local "me" holder ids to real socket ids
+      // translate local "me" ids to real socket ids
       if (ball.holderId === "me") ball.holderId = socket.id;
+      if (ball.throwerId === "me") ball.throwerId = socket.id;
       dirty = true;
     });
 

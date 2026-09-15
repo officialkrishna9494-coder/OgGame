@@ -33,7 +33,7 @@ function HallClient({ me }: { me: Identity }) {
   const mobile = useMobileLandscape();
 
   const socket = useHallSocket(me);
-  const { players, ball, tv, game, toasts, simulated } = socket.snapshot;
+  const { players, ball, tv, game, toasts, simulated, mySocketId } = socket.snapshot;
 
   // persist Google profiles to Firestore `users/{uid}` (no-op without config)
   useEffect(() => {
@@ -72,6 +72,7 @@ function HallClient({ me }: { me: Identity }) {
   }, []);
   const handleContext = useCallback((c: ContextState) => setContext(c), []);
   const handleCollect = useCallback((starId: string) => socket.collectStar(starId), [socket]);
+  const handleHit = useCallback(() => socket.sendHit(), [socket]);
 
   const sitting = players["me"]?.sitting ?? false;
 
@@ -80,6 +81,7 @@ function HallClient({ me }: { me: Identity }) {
       <HallScene
         myName={me.name}
         myColor={me.color}
+        mySocketId={mySocketId}
         players={players}
         ball={ball}
         room={room}
@@ -90,6 +92,7 @@ function HallClient({ me }: { me: Identity }) {
         onNear={handleNear}
         onContext={handleContext}
         onCollect={handleCollect}
+        onHit={handleHit}
       />
 
       {/* soft vignette for coziness */}

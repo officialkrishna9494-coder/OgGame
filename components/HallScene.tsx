@@ -14,6 +14,7 @@ import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 interface Props {
   myName: string;
   myColor: string;
+  mySocketId: string;
   players: Record<string, PlayerState>;
   ball: BallState;
   room: RoomConfig;
@@ -24,6 +25,7 @@ interface Props {
   onNear: (nearId: string | null, nearName: string | null) => void;
   onContext: (c: ContextState) => void;
   onCollect: (starId: string) => void;
+  onHit: () => void;
 }
 
 const MY_ID = "me";
@@ -182,6 +184,8 @@ function windowTexture(): THREE.CanvasTexture {
   return t;
 }
 
+const HIT_RED = new THREE.Color("#ff5d5d");
+
 // ─── star collectible (mini-game) ───────────────────────────────────────────
 function createStar(): THREE.Group {
   const g = new THREE.Group();
@@ -226,6 +230,8 @@ interface AvatarRig {
   emoteUntil: number;
   ring: THREE.Mesh;
   walkPhase: number;
+  // dodgeball: true while the red-flash stunt is showing (skips recolor)
+  wasHit: boolean;
 }
 
 function createAvatar(color: string, name: string): AvatarRig {  const group = new THREE.Group();
@@ -330,20 +336,20 @@ function createAvatar(color: string, name: string): AvatarRig {  const group = n
   ring.position.y = 0.06;
   group.add(ring);
 
-  return { group, body, head, armL, armR, footL, footR, label, emote: null, emoteUntil: 0, ring, walkPhase: Math.random() * 6 };
+  return { group, body, head, armL, armR, footL, footR, label, emote: null, emoteUntil: 0, ring, walkPhase: Math.random() * 6, wasHit: false };
 }
 
 export const hallToss: { fn: null | (() => void) } = { fn: null };
 
-export default function HallScene({ myName, myColor, players, ball, room, tv, game, onMove, onBall, onNear, onContext, onCollect }: Props) {
+export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, onMove, onBall, onNear, onContext, onCollect, onHit }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ players, ball, room, tv, game, myName, myColor });
-  const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect });
+  const stateRef = useRef({ players, ball, room, tv, game, myName, myColor, mySocketId });
+  const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect, onHit });
 
   // keep the long-lived Three.js loop fed with fresh props without re-creating it
   useEffect(() => {
-    stateRef.current = { players, ball, room, tv, game, myName, myColor };
-    cbRef.current = { onMove, onBall, onNear, onContext, onCollect };
+    stateRef.current = { players, ball, room, tv, game, myName, myColor, mySocketId };
+    cbRef.current = { onMove, onBall, onNear, onContext, onCollect, onHit };
   });
 
   useEffect(() => {
@@ -787,8 +793,8 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
         rigs.set(id, r);
         scene.add(r.group);
       }
-      // recolor / rename if changed
-      if ((r.body.material as THREE.MeshStandardMaterial).color.getStyle() !== new THREE.Color(p.color).getStyle()) {
+      // recolor / rename if changed (never mid bonk-flash — that restores itself)
+      if (!r.wasHit && (r.body.material as THREE.MeshStandardMaterial).color.getStyle() !== new THREE.Color(p.color).getStyle()) {
         (r.body.material as THREE.MeshStandardMaterial).color.set(p.color);
       }
       return r;
@@ -855,6 +861,11 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
     let lastTvSig = "";
     let lastCtxSig = "";
     const claimedStars = new Set<string>();
+    // ball ownership optimism: instant local feedback across the ~100ms echo
+    let optimisticHold = false;
+    let optimisticUntil = 0;
+    let tossedUntil = 0;
+    let selfHitAt = 0;
 
     const timer = new THREE.Timer();
     let dead = false;
@@ -947,25 +958,46 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
       me.x = Math.max(-HALL_BOUNDS.x, Math.min(HALL_BOUNDS.x, me.x));
       me.z = Math.max(HALL_BOUNDS.zMin, Math.min(HALL_BOUNDS.zMax, me.z));
 
-      // ── ball ──
+      // ── ball: network is the source of truth for WHO holds it ──────────
+      // Own socket id translates to "me" so held balls always resolve.
       const netBall = st.ball;
+      const myId = st.mySocketId;
+      const rawHolder = netBall.holderId ?? null;
+      const netHolder = rawHolder && myId !== "" && rawHolder === myId ? MY_ID : rawHolder;
+      const nowMs = performance.now();
+      if (netHolder && netHolder !== MY_ID) optimisticHold = false; // someone else grabbed it
+      if (optimisticHold && nowMs >= optimisticUntil && netHolder !== MY_ID) optimisticHold = false;
+      const echoStale = nowMs < tossedUntil; // just threw: trust local sim, not the old echo
+      const held = !echoStale && (netHolder === MY_ID || optimisticHold);
+
       const netSig = JSON.stringify([netBall.x, netBall.z, netBall.holderId]);
       if (netSig !== lastNetBall) {
         lastNetBall = netSig;
-        // adopt network ball unless we are holding it
-        if (netBall.holderId !== MY_ID && ballPhys.holderId !== MY_ID) {
+        if (!held) {
           ballPhys.x = netBall.x;
           ballPhys.z = netBall.z;
           ballPhys.y = netBall.y;
           ballPhys.vx = netBall.vx;
           ballPhys.vy = netBall.vy;
           ballPhys.vz = netBall.vz;
-          ballPhys.holderId = netBall.holderId;
-        } else if (netBall.holderId && netBall.holderId !== MY_ID) {
-          ballPhys.holderId = netBall.holderId;
+          ballPhys.holderId = null;
         }
       }
-      if (!ballPhys.holderId) {
+      if (held) {
+        ballPhys.holderId = MY_ID;
+        ballPhys.vx = ballPhys.vy = ballPhys.vz = 0;
+        ballPhys.x = me.x + Math.sin(me.facing) * 0.55;
+        ballPhys.z = me.z + Math.cos(me.facing) * 0.55;
+        ballPhys.y = 0.85 + me.y;
+      } else if (netHolder && st.players[netHolder]) {
+        // friend is holding it — glide to their hand (always visible now)
+        const holder = st.players[netHolder];
+        ballPhys.holderId = netHolder;
+        ballPhys.x += (holder.x + Math.sin(holder.facing) * 0.55 - ballPhys.x) * Math.min(1, dt * 10);
+        ballPhys.z += (holder.z + Math.cos(holder.facing) * 0.55 - ballPhys.z) * Math.min(1, dt * 10);
+        ballPhys.y += (0.85 - ballPhys.y) * Math.min(1, dt * 10);
+      } else {
+        ballPhys.holderId = null;
         ballPhys.vy -= 16 * dt;
         ballPhys.x += ballPhys.vx * dt;
         ballPhys.z += ballPhys.vz * dt;
@@ -988,19 +1020,34 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
         const speed = Math.hypot(ballPhys.vx, ballPhys.vz);
         if (d < 0.65 && ballPhys.y < 0.9 && speed < 3 && !sitting) {
           ballPhys.holderId = MY_ID;
+          ballPhys.throwerId = null;
+          ballPhys.thrownAt = 0;
+          optimisticHold = true;
+          optimisticUntil = nowMs + 1500;
           cbRef.current.onBall({ ...ballPhys });
         }
-      } else if (ballPhys.holderId === MY_ID) {
-        ballPhys.x = me.x + Math.sin(me.facing) * 0.55;
-        ballPhys.z = me.z + Math.cos(me.facing) * 0.55;
-        ballPhys.y = 0.85 + me.y;
-      } else {
-        // follow holder
-        const holder = st.players[ballPhys.holderId];
-        if (holder) {
-          ballPhys.x += (holder.x - ballPhys.x) * Math.min(1, dt * 10);
-          ballPhys.z += (holder.z - ballPhys.z) * Math.min(1, dt * 10);
-          ballPhys.y += (0.85 - ballPhys.y) * Math.min(1, dt * 10);
+      }
+
+      // ── dodgeball bonk: fast free ball, thrown by a friend, meets me ──
+      {
+        const spd = Math.hypot(ballPhys.vx, ballPhys.vz);
+        const thr = st.ball.throwerId ?? null;
+        const thrownAt = st.ball.thrownAt ?? 0;
+        const now = Date.now();
+        const selfThrow = !thr || thr === MY_ID || (myId !== "" && thr === myId);
+        const alreadyHit = selfHitAt !== 0 && now - selfHitAt < 2500;
+        if (
+          !held &&
+          !selfThrow &&
+          !alreadyHit &&
+          spd > 3 &&
+          now - thrownAt > 700 &&
+          now - thrownAt < 4000 &&
+          ballPhys.y < 1.5 &&
+          Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z) < 0.9
+        ) {
+          selfHitAt = now;
+          cbRef.current.onHit();
         }
       }
 
@@ -1021,6 +1068,7 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
           self?.action && self?.actionAt && Date.now() - self.actionAt < 1200
             ? { action: self.action, actionAt: self.actionAt, actionTarget: self.actionTarget ?? null }
             : {};
+        const freshHit = selfHitAt !== 0 && Date.now() - selfHitAt < 2000 ? { hitAt: selfHitAt } : {};
         cbRef.current.onMove({
           id: MY_ID,
           name: st.myName,
@@ -1033,6 +1081,7 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
           jumping: me.y > 0.02,
           ...freshEmote,
           ...freshAction,
+          ...freshHit,
         });
       }
 
@@ -1160,6 +1209,25 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
           rig.emote = null;
         }
 
+        // bonk'd! — red flash + dizzy hop for 2s (self reads local stamp,
+        // friends read the server echo; both restore cleanly after)
+        const selfStamp = id === MY_ID ? selfHitAt : 0;
+        const hitStamp = selfStamp !== 0 ? selfStamp : (p.hitAt ?? 0);
+        const hitFresh = hitStamp !== 0 && Date.now() - hitStamp < 2000;
+        const bodyMat = rig.body.material as THREE.MeshStandardMaterial;
+        if (hitFresh) {
+          const k = 1 - (Date.now() - hitStamp) / 2000; // 1 → 0
+          bodyMat.color.set(p.color).lerp(HIT_RED, 0.3 + 0.7 * k);
+          rig.wasHit = true;
+          g.position.y += Math.abs(Math.sin(elapsed * 13)) * 0.26 * k;
+          rig.head.rotation.z += Math.sin(elapsed * 18) * 0.28 * k;
+          rig.head.rotation.x = Math.sin(elapsed * 15) * 0.15 * k;
+        } else if (rig.wasHit) {
+          bodyMat.color.set(p.color);
+          rig.head.rotation.x = 0;
+          rig.wasHit = false;
+        }
+
         // action ring (poke = pink pulse, high-five = gold)
         const freshAction = p.action && p.actionAt && Date.now() - p.actionAt < 1200;
         const mat = rig.ring.material as THREE.MeshBasicMaterial;
@@ -1180,11 +1248,26 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
           rigs.delete(id);
         }
       }
-
-      // ── ball mesh ──
-      if (ballPhys.holderId === MY_ID || (st.ball.holderId === MY_ID && ballPhys.holderId !== MY_ID)) {
-        ballPhys.holderId = st.ball.holderId ?? ballPhys.holderId;
-      }      ballMesh.position.set(ballPhys.x, ballPhys.y, ballPhys.z);
+      // ── ball mesh: held balls render from synced player positions ──
+      // (never from fragile local adoption chains — always visible)
+      const rawH = st.ball.holderId ?? null;
+      const renderHolder = rawH && st.mySocketId !== "" && rawH === st.mySocketId ? MY_ID : rawH;
+      if (renderHolder === MY_ID) {
+        ballMesh.position.set(
+          me.x + Math.sin(me.facing) * 0.55,
+          0.85 + me.y,
+          me.z + Math.cos(me.facing) * 0.55
+        );
+      } else if (renderHolder && st.players[renderHolder]) {
+        const h = st.players[renderHolder];
+        ballMesh.position.set(
+          h.x + Math.sin(h.facing) * 0.55,
+          0.85,
+          h.z + Math.cos(h.facing) * 0.55
+        );
+      } else {
+        ballMesh.position.set(ballPhys.x, ballPhys.y, ballPhys.z);
+      }
       ballMesh.rotation.x += dt * (Math.hypot(ballPhys.vx, ballPhys.vz) * 1.6 + 0.4);
       ballMesh.rotation.z += dt * 0.5;
 
@@ -1276,6 +1359,10 @@ export default function HallScene({ myName, myColor, players, ball, room, tv, ga
         ballPhys.vx = Math.sin(f) * 5.5;
         ballPhys.vz = Math.cos(f) * 5.5;
         ballPhys.vy = 4.6;
+        ballPhys.throwerId = MY_ID;
+        ballPhys.thrownAt = Date.now();
+        optimisticHold = false;
+        tossedUntil = performance.now() + 500;
         cbRef.current.onBall({ ...ballPhys });
       }
     };
