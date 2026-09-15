@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { BALL_SPAWN } from "./room-defaults";
-import { CHAT_MAX_LEN, IDLE_GAME, IDLE_RPS, type BallState, type GameState, type PlayerState, type RpsChoice, type RpsState, type SosState, type TvState } from "./hall-types";
+import { CHAT_MAX_LEN, IDLE_DODGE, IDLE_GAME, IDLE_RPS, type BallState, type DodgeState, type GameState, type PlayerState, type RpsChoice, type RpsState, type SosState, type TvState } from "./hall-types";
 
 export interface HallSnapshot {
   connected: boolean;
@@ -21,6 +21,9 @@ export interface HallSnapshot {
   game: GameState;
   rps: RpsState;
   sos: SosState | null;
+  dodge: DodgeState;
+  /** add to Date.now() to read the server's clock (round timers, live throws) */
+  serverOffset: number;
   toasts: Toast[];
 }
 
@@ -85,8 +88,11 @@ export function useHallSocket(me: JoinInfo | null) {
     game: IDLE_GAME,
     rps: IDLE_RPS,
     sos: null,
+    dodge: IDLE_DODGE,
+    serverOffset: 0,
     toasts: [],
   });
+  const offsetRef = useRef<number | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const localRef = useRef<PlayerState | null>(null);
@@ -147,7 +153,12 @@ export function useHallSocket(me: JoinInfo | null) {
       socket.emit("hall:join", { name: me?.name ?? "Friend", color: me?.color ?? "#ffb3c7" });
     });
     socket.on("connect_error", failToBots);
-    socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState; game?: GameState; rps?: RpsState; sos?: SosState | null }) => {
+    socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState; game?: GameState; rps?: RpsState; sos?: SosState | null; dodge?: DodgeState; now?: number }) => {
+      // server clock offset, smoothed so one slow packet can't jolt timers
+      if (typeof state.now === "number") {
+        const sample = state.now - Date.now();
+        offsetRef.current = offsetRef.current === null ? sample : offsetRef.current * 0.85 + sample * 0.15;
+      }
       // The server echoes our own player back under our socket.id — drop it so
       // we render exactly ONE self avatar (the local "me" prediction).
       const mine = socket.id;
@@ -160,6 +171,8 @@ export function useHallSocket(me: JoinInfo | null) {
       const game = state.game ?? IDLE_GAME;
       const rps = state.rps ?? IDLE_RPS;
       const sos = state.sos ?? null;
+      const dodge = state.dodge ?? IDLE_DODGE;
+      const serverOffset = offsetRef.current ?? 0;
       setSnapshot((s) => ({
         ...s,
         players: { ...others, ...(localRef.current ? { [localRef.current.id]: localRef.current } : {}) },
@@ -168,6 +181,8 @@ export function useHallSocket(me: JoinInfo | null) {
         game,
         rps,
         sos,
+        dodge,
+        serverOffset,
       }));
     });
     socket.on("hall:toast", (payload: unknown) => {
@@ -344,6 +359,20 @@ export function useHallSocket(me: JoinInfo | null) {
     emit("rps:leave", {});
   }, [emit]);
 
+  // ── dodgeball ──
+  const startDodge = useCallback(() => emit("dodge:start", {}), [emit]);
+  const pickupDodge = useCallback((ballId: string) => emit("dodge:pickup", { ballId }), [emit]);
+  const throwDodge = useCallback(
+    (ballId: string, b: { x: number; y: number; z: number; vx: number; vy: number; vz: number }) =>
+      emit("dodge:throw", { ballId, ...b }),
+    [emit]
+  );
+  const spendDodge = useCallback((ballId: string, rev: number) => emit("dodge:spend", { ballId, rev }), [emit]);
+  const hitDodge = useCallback(
+    (ballId: string, b: { x: number; y: number; z: number; vx: number; vz: number }) => emit("dodge:hit", { ballId, ...b }),
+    [emit]
+  );
+
   const collectStar = useCallback(
     (starId: string) => {
       emit("game:collect", { starId });
@@ -370,6 +399,11 @@ export function useHallSocket(me: JoinInfo | null) {
     pickRps,
     leaveRps,
     collectStar,
+    startDodge,
+    pickupDodge,
+    throwDodge,
+    spendDodge,
+    hitDodge,
     pushToast,
   };
 }

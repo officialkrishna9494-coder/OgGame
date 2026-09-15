@@ -2,6 +2,8 @@
 // Firestore persists room config / frames / posters / playlist / accounts.
 // Socket.io carries everything temporary: presence, movement, emotes, TV sync.
 
+import { RPS_SPOT } from "./hall-layout";
+
 export interface Vec2 {
   x: number;
   z: number;
@@ -125,6 +127,10 @@ export interface ContextState {
   nearGame: boolean;
   nearRps: boolean;
   nearEmergency: boolean;
+  /** standing on the dodgeball court's start pad */
+  nearDodgePad: boolean;
+  /** carrying a dodgeball during a round */
+  holdingDodge: boolean;
 }
 
 export const IDLE_CONTEXT: ContextState = {
@@ -135,6 +141,8 @@ export const IDLE_CONTEXT: ContextState = {
   nearGame: false,
   nearRps: false,
   nearEmergency: false,
+  nearDodgePad: false,
+  holdingDodge: false,
 };
 
 // ─── Star Scramble (mini-game nº 1 — intentionally tiny) ────────────────────
@@ -218,8 +226,98 @@ export const RPS_WIN_SCORE = 3;
 export const RPS_ROUND_MS = 20_000;
 export const RPS_REVEAL_MS = 3_500;
 
-// RPS table spot — back-left, by the window end
-export const RPS_TABLE = { x: -10, z: -6.5 };
+// RPS table spot (lib/hall-layout owns every position)
+export const RPS_TABLE = RPS_SPOT.table;
+
+// ─── Dodgeball court (mini-game nº 3) ───────────────────────────────────────
+// Start at the court's pad → a short countdown → everyone standing on the
+// court is in, one ball each. A hit only counts while the throw is still
+// "live" (before the ball touches the floor or furniture). Score = hits
+// landed − times hit. The server referees, times the round and ranks.
+export const DODGE_COUNTDOWN_MS = 6_000;
+export const DODGE_ROUND_MS = 90_000;
+export const DODGE_RESULTS_MS = 14_000;
+export const DODGE_MIN_PLAYERS = 2;
+/** after being hit you can't be hit again for this long */
+export const DODGE_SHIELD_MS = 1_400;
+/** a throw can score for this long after release (it's usually dead sooner) */
+export const DODGE_LIVE_MS = 2_600;
+
+export interface DodgeBall {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  holderId: string | null;
+  throwerId: string | null;
+  thrownAt: number;
+  /** this throw can no longer score (already hit someone, or picked up) */
+  spent: boolean;
+  /** bumps on every server-side change so clients know to re-sync */
+  rev: number;
+}
+
+export interface DodgeStats {
+  id: string;
+  name: string;
+  color: string;
+  hits: number;
+  taken: number;
+  /** left the hall mid-round (kept in the standings) */
+  left?: boolean;
+}
+
+export interface DodgeHit {
+  id: number;
+  by: string;
+  byName: string;
+  victim: string;
+  victimName: string;
+  at: number;
+}
+
+export interface DodgeRank extends DodgeStats {
+  rank: number;
+  score: number;
+}
+
+export interface DodgeState {
+  status: "idle" | "countdown" | "playing" | "ended";
+  startedBy: string;
+  startsAt: number;
+  endsAt: number;
+  endedAt: number;
+  roster: Record<string, DodgeStats>;
+  balls: DodgeBall[];
+  feed: DodgeHit[];
+  ranking: DodgeRank[];
+}
+
+export const IDLE_DODGE: DodgeState = {
+  status: "idle",
+  startedBy: "",
+  startsAt: 0,
+  endsAt: 0,
+  endedAt: 0,
+  roster: {},
+  balls: [],
+  feed: [],
+  ranking: [],
+};
+
+/** Score, then most hits, then fewest times hit, then name — ties share a rank. */
+export function rankDodge(roster: Record<string, DodgeStats>): DodgeRank[] {
+  const rows = Object.values(roster).map((s) => ({ ...s, score: s.hits - s.taken, rank: 0 }));
+  rows.sort((a, b) => b.score - a.score || b.hits - a.hits || a.taken - b.taken || a.name.localeCompare(b.name));
+  rows.forEach((r, i) => {
+    const prev = rows[i - 1];
+    r.rank = prev && prev.score === r.score && prev.hits === r.hits && prev.taken === r.taken ? prev.rank : i + 1;
+  });
+  return rows;
+}
 
 // ─── Emergency signal ───────────────────────────────────────────────────────
 // One red button by the TV. Raising it flashes every screen red + pops a

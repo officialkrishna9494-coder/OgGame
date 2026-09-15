@@ -23,14 +23,11 @@ const handle = app.getRequestHandler();
 // Single-hall state (multi-room = prefix keys if you grow beyond one hall)
 const players = new Map(); // socketId -> PlayerState
 const meta = new Map(); // socketId -> { name, color }
-// resting spot clear of every furniture solid (mirrors BALL_SPAWN in lib/room-defaults)
-const BALL_SPAWN = (() => {
-  try {
-    return require("./lib/room-defaults").BALL_SPAWN;
-  } catch {
-    return { x: 2.8, z: 0.2 };
-  }
-})();
+// floor plan + dodgeball referee are shared TypeScript (tsx loads them)
+const layout = require("./lib/hall-layout");
+const dodgeRef = require("./lib/dodge-referee");
+// resting spot clear of every furniture solid
+const BALL_SPAWN = layout.BALL_SPAWN;
 let ball = { x: BALL_SPAWN.x, z: BALL_SPAWN.z, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null };
 let tv = { playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: Date.now() };
 // watch-party drive cooldown (shared across all sockets — see hall:tv)
@@ -41,27 +38,20 @@ let lastTvDriveBy = null;
 let gameSeq = 1;
 let game = { status: "idle", endsAt: 0, endedAt: 0, stars: [], scores: {}, lastCollect: null, winner: null };
 const GAME_MS = 60_000;
-const STAR_COUNT = 12;
+const STAR_COUNT = 16; // the hall is twice the size now
 
 // Spawn blockers mirror lib/room-defaults COLLIDERS (plus margin) so stars
 // never land inside the sofa. Loaded from source when available.
 function getBlockers() {
-  try {
-    return require("./lib/room-defaults").COLLIDERS;
-  } catch {
-    return [
-      { x: 0, z: 5.5, hx: 3.0, hz: 0.8 },
-      { x: 0, z: 3.0, hx: 1.5, hz: 0.8 },
-      { x: 0, z: -10.8, hx: 3.4, hz: 0.7 },
-    ];
-  }
+  return require("./lib/room-defaults").COLLIDERS;
 }
 
 function spawnStar() {
   const blocks = getBlockers();
-  for (let i = 0; i < 50; i++) {
-    const x = (Math.random() - 0.5) * 27;
-    const z = -10.5 + Math.random() * 20;
+  const { HALL } = layout;
+  for (let i = 0; i < 80; i++) {
+    const x = HALL.xMin + 2 + Math.random() * (HALL.xMax - HALL.xMin - 4);
+    const z = HALL.zMin + 2 + Math.random() * (HALL.zMax - HALL.zMin - 4);
     const blocked = blocks.some(
       (c) => Math.abs(x - c.x) < c.hx + 0.9 && Math.abs(z - c.z) < c.hz + 0.9
     );
@@ -86,8 +76,16 @@ function endGame(io) {
   );
 }
 
+// ─── Dodgeball court (mini-game nº 3) — rules live in lib/dodge-referee ────
+const dodge = dodgeRef.createDodge();
+
 function snapshot() {
-  return { players: Object.fromEntries(players), ball, tv, game, rps, sos };
+  // `now` lets clients line their timers up with the server clock
+  return { players: Object.fromEntries(players), ball, tv, game, rps, sos, dodge, now: Date.now() };
+}
+
+function refPlayers() {
+  return [...players.values()].map((p) => ({ id: p.id, name: p.name, color: p.color, x: p.x, z: p.z }));
 }
 
 // ─── Emergency signal: one red button, global 10s cooldown, ~3.5s alarm ────
@@ -179,6 +177,19 @@ function broadcast(io) {
   io.to("hall").emit("hall:state", snapshot());
 }
 
+// relay whatever the dodgeball referee decided
+function applyDodge(io, result) {
+  if (!result || !result.changed) return;
+  dirty = true;
+  if (result.toast) io.to("hall").emit("hall:toast", result.toast);
+  if (result.hitVictim) {
+    const victim = players.get(result.hitVictim);
+    if (victim) players.set(victim.id, { ...victim, hitAt: Date.now() });
+  }
+  // the lobby ball rests while a round is on
+  if (dodge.status === "playing" && ball.holderId) ball = { ...ball, holderId: null, vx: 0, vy: 0, vz: 0 };
+}
+
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     // WHATWG URL (legacy url.parse() is deprecated) shaped for Next's handler.
@@ -199,8 +210,9 @@ app.prepare().then(() => {
     }
   }, 84);
 
-  // game clock: end rounds + retire result screens (+ RPS referee ticks)
+  // game clock: end rounds + retire result screens (+ RPS / dodgeball ticks)
   setInterval(() => {
+    applyDodge(io, dodgeRef.tick(dodge, refPlayers(), Date.now()));
     if (game.status === "playing" && Date.now() > game.endsAt) {
       endGame(io);
       dirty = true;
@@ -227,7 +239,7 @@ app.prepare().then(() => {
       sos = null;
       dirty = true;
     }
-  }, 500);
+  }, 250);
 
   io.on("connection", (socket) => {
     socket.on("hall:join", ({ name, color }) => {
@@ -238,8 +250,8 @@ app.prepare().then(() => {
         id: socket.id,
         name: clean,
         color: String(color || "#ffb3c7"),
-        x: (Math.random() - 0.5) * 12,
-        z: 5 + Math.random() * 3,
+        x: (Math.random() - 0.5) * 2 * layout.SPAWN.xSpread,
+        z: layout.SPAWN.zMin + Math.random() * (layout.SPAWN.zMax - layout.SPAWN.zMin),
         facing: Math.PI,
         moving: false,
         sitting: false,
@@ -440,6 +452,25 @@ app.prepare().then(() => {
       dirty = true;
     });
 
+    // ─── dodgeball ──────────────────────────────────────────────────────────
+    socket.on("dodge:start", () => {
+      const p = players.get(socket.id);
+      if (!p) return;
+      applyDodge(io, dodgeRef.requestStart(dodge, { id: p.id, name: p.name, color: p.color, x: p.x, z: p.z }, Date.now()));
+    });
+    socket.on("dodge:pickup", ({ ballId } = {}) => {
+      applyDodge(io, dodgeRef.pickup(dodge, socket.id, ballId, Date.now()));
+    });
+    socket.on("dodge:throw", (payload = {}) => {
+      applyDodge(io, dodgeRef.throwBall(dodge, socket.id, payload.ballId, payload, Date.now()));
+    });
+    socket.on("dodge:spend", ({ ballId, rev } = {}) => {
+      applyDodge(io, dodgeRef.spend(dodge, socket.id, ballId, rev));
+    });
+    socket.on("dodge:hit", (payload = {}) => {
+      applyDodge(io, dodgeRef.hit(dodge, socket.id, payload.ballId, payload, Date.now()));
+    });
+
     // ─── RPS arena ──────────────────────────────────────────────────────────
     socket.on("rps:challenge", () => {
       const m = meta.get(socket.id);
@@ -514,6 +545,7 @@ app.prepare().then(() => {
       const leaving = players.get(socket.id);
       players.delete(socket.id);
       meta.delete(socket.id);
+      applyDodge(io, dodgeRef.leave(dodge, socket.id, leaving ? { x: leaving.x, z: leaving.z } : null, Date.now()));
       if (ball.holderId === socket.id) {
         // drop it from their hands where they stood — not back at the spot
         // it was picked up from (clients push it clear of any furniture)

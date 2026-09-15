@@ -1,13 +1,15 @@
 // ─── Cozy Hall · the one contextual action (ACT button · E key · prompt) ────
 // Single source of truth shared by the HUD (what the button says and does)
 // and the 3D scene (where the in-world prompt floats), so the two can never
-// disagree. Priority: SOS → throw ball → add video (TV) → duel (RPS table)
-// → star game (rug, idle) → sofa sit / stand.
+// disagree. Priority: SOS → throw (lobby ball or dodgeball) → add video (TV)
+// → duel (RPS table) → star game (rug, idle) → dodgeball (court pad, idle)
+// → sofa sit / stand.
 
 import type { IconName } from "../components/icons";
+import { COURT, LOUNGE, RPS_SPOT, SOS_SPOT, TV } from "./hall-layout";
 import type { ContextState } from "./hall-types";
 
-export type ActionKey = "sos" | "toss" | "addLink" | "duel" | "starGame" | "sit" | "stand";
+export type ActionKey = "sos" | "toss" | "addLink" | "duel" | "starGame" | "dodge" | "sit" | "stand";
 
 export interface ActionFlags {
   sitting: boolean;
@@ -15,6 +17,7 @@ export interface ActionFlags {
   rpsStatus?: string;
   /** my seat at the RPS table, if I'm a duelist */
   rpsSeat?: "a" | "b" | null;
+  dodgeStatus?: string;
 }
 
 export interface InteractAction {
@@ -37,10 +40,11 @@ export const HOLD_MS = 650;
 export function actionKey(ctx: ContextState | undefined, f: ActionFlags): ActionKey | null {
   if (!ctx) return null;
   if (ctx.nearEmergency) return "sos";
-  if (ctx.holdingBall) return "toss";
+  if (ctx.holdingBall || ctx.holdingDodge) return "toss";
   if (ctx.nearTv) return "addLink";
   if (ctx.nearRps) return "duel";
   if (ctx.nearGame && f.gameStatus === "idle") return "starGame";
+  if (ctx.nearDodgePad && (f.dodgeStatus ?? "idle") === "idle") return "dodge";
   if (ctx.nearSofa) return f.sitting ? "stand" : "sit";
   return null;
 }
@@ -59,13 +63,17 @@ export function resolveAction(ctx: ContextState | undefined, f: ActionFlags): In
     case "sos":
       return { key, icon: "sos", label: "sos", prompt: "Hold to raise SOS", glow: "#ff3b3b", hold: true };
     case "toss":
-      return { key, icon: "toss", label: "throw", prompt: "Throw the ball", glow: "#ff6b6b", hold: false };
+      return ctx?.holdingDodge
+        ? { key, icon: "dodge", label: "throw", prompt: "Throw the dodgeball", glow: "#4cc9f0", hold: false }
+        : { key, icon: "toss", label: "throw", prompt: "Throw the ball", glow: "#ff6b6b", hold: false };
     case "addLink":
       return { key, icon: "addLink", label: "add video", prompt: "Add a video to the TV", glow: "#ff8fab", hold: false };
     case "duel":
       return { key, icon: "duel", ...duelPrompt(f), glow: "#40916c", hold: false };
     case "starGame":
       return { key, icon: "starGame", label: "play", prompt: "Start star scramble", glow: "#ffb703", hold: false };
+    case "dodge":
+      return { key, icon: "dodge", label: "dodgeball", prompt: "Start dodgeball", glow: "#4cc9f0", hold: false };
     case "sit":
       return { key, icon: "sofa", label: "sit", prompt: "Sit on the sofa", glow: "#a0c4ff", hold: false };
     case "stand":
@@ -77,26 +85,30 @@ export function resolveAction(ctx: ContextState | undefined, f: ActionFlags): In
 
 /** World point (x, y, z) the in-world prompt points at, per action. */
 export function actionAnchor(key: ActionKey, me: { x: number; y: number; z: number }, out: { x: number; y: number; z: number }) {
+  const sofaZ = LOUNGE.sofa.z;
   switch (key) {
     case "sos": // above the "SOS" tag on the pedestal
-      out.x = 5.0; out.y = 2.45; out.z = -10.0;
+      out.x = SOS_SPOT.x; out.y = 2.45; out.z = SOS_SPOT.z;
       break;
     case "toss": // over your own head
       out.x = me.x; out.y = me.y + 2.7; out.z = me.z;
       break;
     case "addLink": // on the TV stand, below the screen (never over the picture)
-      out.x = 0; out.y = 0.62; out.z = -10.3;
+      out.x = TV.x; out.y = 0.62; out.z = TV.standZ + 0.95;
       break;
     case "duel": // over the felt table, above the floating hands
-      out.x = -10; out.y = 2.75; out.z = -6.5;
+      out.x = RPS_SPOT.table.x; out.y = 2.75; out.z = RPS_SPOT.table.z;
       break;
     case "starGame": // the rug's coffee table
-      out.x = 0; out.y = 0.9; out.z = 3.0;
+      out.x = LOUNGE.table.x; out.y = 0.9; out.z = LOUNGE.table.z + 0.8;
+      break;
+    case "dodge": // the glowing start pad by the court
+      out.x = COURT.pad.x; out.y = 0.9; out.z = COURT.pad.z;
       break;
     case "sit":
-      if (me.z >= 7) {
+      if (me.z >= sofaZ) {
         // camera side: the top of the backrest, in line with you
-        out.x = Math.max(-2.4, Math.min(2.4, me.x)); out.y = 1.8; out.z = 7.6;
+        out.x = Math.max(LOUNGE.sofa.x - 2.4, Math.min(LOUNGE.sofa.x + 2.4, me.x)); out.y = 1.8; out.z = sofaZ + 0.6;
       } else {
         // TV side: your head is higher on screen than the backrest — go above it
         out.x = me.x; out.y = me.y + 2.7; out.z = me.z;

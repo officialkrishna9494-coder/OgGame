@@ -7,13 +7,24 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { BallState, ContextState, GameState, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
-import { IDLE_CONTEXT } from "../lib/hall-types";
-import { ejectBall, handPoint, PICKUP_RADIUS, reachField, stepBall } from "../lib/ball-physics";
+import type { BallState, ContextState, DodgeState, GameState, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
+import { DODGE_LIVE_MS, DODGE_SHIELD_MS, IDLE_CONTEXT } from "../lib/hall-types";
+import { ejectBall, handPoint, PICKUP_RADIUS, reachField, stepBall, TOUCH_FLOOR, TOUCH_SOLID, TOUCH_WALL } from "../lib/ball-physics";
+import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, inCourt } from "../lib/hall-layout";
+import { buildEnvironment, type CourtMode } from "./scene/environment";
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
+
+export interface DodgeThrow {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+}
 
 interface Props {
   myName: string;
@@ -26,15 +37,27 @@ interface Props {
   game: GameState;
   rps: RpsState;
   sos: SosState | null;
+  dodge: DodgeState;
+  serverOffset: number;
   onMove: (p: PlayerState) => void;
   onBall: (b: BallState) => void;
   onNear: (nearId: string | null, nearName: string | null) => void;
   onContext: (c: ContextState) => void;
   onCollect: (starId: string) => void;
   onHit: () => void;
+  onDodgePickup: (ballId: string) => void;
+  onDodgeThrow: (ballId: string, b: DodgeThrow) => void;
+  onDodgeSpend: (ballId: string, rev: number) => void;
+  onDodgeHit: (ballId: string, b: { x: number; y: number; z: number; vx: number; vz: number }) => void;
 }
 
 const MY_ID = "me";
+// dodgeball throw: flat and quick, so a hit is a skill shot, not a lob
+const DODGE_THROW_SPEED = 11.5;
+const DODGE_THROW_LIFT = 2.6;
+// gentle aim assist toward an opponent within this cone / range
+const AIM_CONE = 0.45;
+const AIM_RANGE = 14;
 
 // camera distance range — shared by wheel, trackpad pinch and touch pinch
 const ZOOM_MIN = 14;
@@ -224,51 +247,6 @@ function posterTexture(title: string, sub: string, hue: number): THREE.CanvasTex
   return t;
 }
 
-// window view — painted ON the pane so the outside stays inside the frame
-function windowTexture(): THREE.CanvasTexture {
-  const c = document.createElement("canvas");
-  c.width = 480;
-  c.height = 320;
-  const g = c.getContext("2d")!;
-  const sky = g.createLinearGradient(0, 0, 0, 320);
-  sky.addColorStop(0, "#aee2ff");
-  sky.addColorStop(1, "#e8f6ff");
-  g.fillStyle = sky;
-  g.fillRect(0, 0, 480, 320);
-  // sun + halo
-  g.fillStyle = "rgba(255, 243, 176, 0.45)";
-  g.beginPath();
-  g.arc(110, 78, 62, 0, Math.PI * 2);
-  g.fill();
-  g.fillStyle = "#fff3b0";
-  g.beginPath();
-  g.arc(110, 78, 42, 0, Math.PI * 2);
-  g.fill();
-  // clouds
-  g.fillStyle = "rgba(255,255,255,0.92)";
-  const cloud = (x: number, y: number, s: number) => {
-    g.beginPath();
-    g.arc(x, y, 22 * s, 0, Math.PI * 2);
-    g.arc(x + 24 * s, y - 8 * s, 26 * s, 0, Math.PI * 2);
-    g.arc(x + 52 * s, y, 20 * s, 0, Math.PI * 2);
-    g.fill();
-  };
-  cloud(300, 66, 1);
-  cloud(185, 128, 0.7);
-  // hills
-  g.fillStyle = "#b5e3b5";
-  g.beginPath();
-  g.ellipse(120, 345, 220, 110, 0, 0, Math.PI * 2);
-  g.fill();
-  g.fillStyle = "#93d193";
-  g.beginPath();
-  g.ellipse(405, 355, 200, 100, 0, 0, Math.PI * 2);
-  g.fill();
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
 const HIT_RED = new THREE.Color("#ff5d5d");
 
 // ─── star collectible (mini-game) ───────────────────────────────────────────
@@ -436,15 +414,15 @@ function lerpAngle(a: number, b: number, t: number): number {
 
 export const hallToss: { fn: null | (() => void) } = { fn: null };
 
-export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, rps, sos, onMove, onBall, onNear, onContext, onCollect, onHit }: Props) {
+export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, rps, sos, dodge, serverOffset, onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ players, ball, room, tv, game, rps, sos, myName, myColor, mySocketId });
-  const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect, onHit });
+  const stateRef = useRef({ players, ball, room, tv, game, rps, sos, dodge, serverOffset, myName, myColor, mySocketId });
+  const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit });
 
   // keep the long-lived Three.js loop fed with fresh props without re-creating it
   useEffect(() => {
-    stateRef.current = { players, ball, room, tv, game, rps, sos, myName, myColor, mySocketId };
-    cbRef.current = { onMove, onBall, onNear, onContext, onCollect, onHit };
+    stateRef.current = { players, ball, room, tv, game, rps, sos, dodge, serverOffset, myName, myColor, mySocketId };
+    cbRef.current = { onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit };
   });
 
   useEffect(() => {
@@ -466,7 +444,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#f6efe6");
-    scene.fog = new THREE.Fog("#f6efe6", 36, 75);
+    scene.fog = new THREE.Fog("#f6efe6", 48, 100);
 
     const camera = new THREE.PerspectiveCamera(44, W / H, 0.1, 140);
     let camDist = 20;
@@ -478,165 +456,36 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     sun.position.set(10, 16, 10);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -20;
-    sun.shadow.camera.right = 20;
-    sun.shadow.camera.top = 20;
-    sun.shadow.camera.bottom = -20;
-    scene.add(sun);
-    const lampLight = new THREE.PointLight("#ffca7a", 18, 20, 2);
-    lampLight.position.set(11.5, 3.4, 3.5);
-    scene.add(lampLight);
-    const lampLight2 = new THREE.PointLight("#ffca7a", 10, 16, 2);
-    lampLight2.position.set(-13.8, 3.2, 0.5);
-    scene.add(lampLight2);
+    // the shadow frustum follows the camera's gaze (see the render loop), so a
+    // hall twice the size keeps the same crisp shadows
+    sun.shadow.camera.left = -19;
+    sun.shadow.camera.right = 19;
+    sun.shadow.camera.top = 19;
+    sun.shadow.camera.bottom = -19;
+    sun.shadow.camera.far = 60;
+    scene.add(sun, sun.target);
     const tvGlow = new THREE.PointLight("#a0c4ff", 8, 13, 2);
-    tvGlow.position.set(0, 3.4, -9.4);
+    tvGlow.position.set(TV.x, 3.2, TV.standZ + 1.8);
     scene.add(tvGlow);
 
-    // ── room shell · 32 × 25 ──
-    const floorMat = new THREE.MeshStandardMaterial({ color: "#e9d4ae", roughness: 0.85 });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(32, 25), floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
-    // plank lines
-    const plankMat = new THREE.MeshBasicMaterial({ color: "#dcc194", transparent: true, opacity: 0.55 });
-    for (let i = -13; i <= 13; i++) {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.04, 25), plankMat);
-      p.rotation.x = -Math.PI / 2;
-      p.position.set(i * 1.15, 0.002, 0);
-      scene.add(p);
-    }
-    const wallMat = new THREE.MeshStandardMaterial({ color: "#fbf5ea", roughness: 0.95 });
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(32, 8.5, 0.4), wallMat);
-    backWall.position.set(0, 4.25, -12.6);
-    backWall.receiveShadow = true;
-    scene.add(backWall);
-    const sideWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, 8.5, 25), wallMat);
-    sideWall.position.set(16.2, 4.25, 0);
-    sideWall.receiveShadow = true;
-    scene.add(sideWall);
-    // wainscot strip
-    const strip = new THREE.Mesh(
-      new THREE.BoxGeometry(32, 0.9, 0.44),
-      new THREE.MeshStandardMaterial({ color: "#f0dfc6", roughness: 0.9 })
-    );
-    strip.position.set(0, 0.8, -12.58);
-    scene.add(strip);
-    // rug — big soft ellipse
-    const rug = new THREE.Mesh(
-      new THREE.CircleGeometry(5.6, 56),
-      new THREE.MeshStandardMaterial({ color: "#ffd9e2", roughness: 1 })
-    );
-    rug.rotation.x = -Math.PI / 2;
-    rug.position.set(0, 0.01, 2.2);
-    rug.receiveShadow = true;
-    scene.add(rug);
-    const rugInner = new THREE.Mesh(
-      new THREE.CircleGeometry(4.0, 56),
-      new THREE.MeshStandardMaterial({ color: "#fff3f6", roughness: 1 })
-    );
-    rugInner.rotation.x = -Math.PI / 2;
-    rugInner.position.set(0, 0.015, 2.2);
-    rugInner.receiveShadow = true;
-    scene.add(rugInner);
-
-    // window on back wall — kept clear of the memory-frame gallery (x ≥ -11)
-    const winFrame = new THREE.Mesh(
-      new THREE.BoxGeometry(3.4, 2.4, 0.16),
-      new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.6 })
-    );
-    winFrame.position.set(-13.6, 5.4, -12.35);
-    scene.add(winFrame);
-    // the outside, painted on the pane — clipped by the frame by construction
-    const winView = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.0, 2.0),
-      new THREE.MeshBasicMaterial({ map: windowTexture() })
-    );
-    winView.position.set(-13.6, 5.4, -12.25);
-    scene.add(winView);
-    // crossbars sell the "window" read
-    const barMat = new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.6 });
-    const barV = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.0, 0.04), barMat);
-    barV.position.set(-13.6, 5.4, -12.23);
-    const barH = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.09, 0.04), barMat);
-    barH.position.set(-13.6, 5.4, -12.23);
-    scene.add(barV, barH);
-
-    // ── sofa (all rounded, seats five) ──
-    const sofa = new THREE.Group();
-    const sofaMat = new THREE.MeshStandardMaterial({ color: "#a0c4ff", roughness: 0.8 });
-    const sofaDark = new THREE.MeshStandardMaterial({ color: "#8ab0f5", roughness: 0.8 });
-    const base = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.7, 1.4), sofaMat);
-    base.position.y = 0.55;
-    base.castShadow = base.receiveShadow = true;
-    sofa.add(base);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(5.6, 1.0, 0.4), sofaMat);
-    back.position.set(0, 1.2, 0.62);
-    back.castShadow = true;
-    sofa.add(back);
-    for (const sx of [-2.7, 2.7]) {
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.36, 0.9, 6, 14), sofaDark);
-      arm.position.set(sx, 0.85, 0);
-      arm.castShadow = true;
-      sofa.add(arm);
-    }
-    for (const sx of [-1.95, -0.65, 0.65, 1.95]) {
-      const cushion = new THREE.Mesh(new THREE.SphereGeometry(0.6, 20, 16), new THREE.MeshStandardMaterial({ color: "#c3d5fd", roughness: 0.9 }));
-      cushion.scale.set(1.05, 0.55, 0.95);
-      cushion.position.set(sx, 0.95, -0.05);
-      cushion.castShadow = true;
-      sofa.add(cushion);
-    }
-    for (const [lx, lz] of [[-2.5, -0.5], [2.5, -0.5], [-2.5, 0.5], [2.5, 0.5]] as const) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.25, 10), new THREE.MeshStandardMaterial({ color: "#8a6f55" }));
-      leg.position.set(lx, 0.12, lz);
-      sofa.add(leg);
-    }
-    sofa.position.set(0, 0, 7.0);
-    scene.add(sofa);
-
-    // coffee table
-    const table = new THREE.Group();
-    const tableTop = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.4, 1.4, 0.12, 32),
-      new THREE.MeshStandardMaterial({ color: "#fffaf0", roughness: 0.5 })
-    );
-    tableTop.position.y = 0.55;
-    tableTop.castShadow = tableTop.receiveShadow = true;
-    table.add(tableTop);
-    const tableLeg = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.22, 0.5, 12),
-      new THREE.MeshStandardMaterial({ color: "#c9a876", roughness: 0.7 })
-    );
-    tableLeg.position.y = 0.26;
-    table.add(tableLeg);
-    // tiny books + cocoa
-    const book1 = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.4), new THREE.MeshStandardMaterial({ color: "#ff8fab" }));
-    book1.position.set(-0.4, 0.65, 0.15);
-    book1.rotation.y = 0.4;
-    const book2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.07, 0.38), new THREE.MeshStandardMaterial({ color: "#9bf6ff" }));
-    book2.position.set(-0.38, 0.72, 0.12);
-    book2.rotation.y = 0.25;
-    const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.18, 14), new THREE.MeshStandardMaterial({ color: "#ff9770" }));
-    mug.position.set(0.55, 0.7, -0.25);
-    table.add(book1, book2, mug);
-    table.position.set(0, 0, 3.0);
-    scene.add(table);
+    // ── the hall itself: shell, lounge, café, fireplace nook, court, garden ──
+    const env = buildEnvironment(scene);
+    let courtMode: CourtMode = "idle";
+    let lastBoardSig = "";
 
     // ── TV wall ──
     const stand = new THREE.Mesh(
       new THREE.BoxGeometry(6.4, 0.6, 0.9),
       new THREE.MeshStandardMaterial({ color: "#7d6b8a", roughness: 0.7 })
     );
-    stand.position.set(0, 0.3, -10.8);
+    stand.position.set(TV.x, 0.3, TV.standZ);
     stand.castShadow = stand.receiveShadow = true;
     scene.add(stand);
     const tvBody = new THREE.Mesh(
       new THREE.BoxGeometry(5.2, 2.9, 0.2),
       new THREE.MeshStandardMaterial({ color: "#2b2430", roughness: 0.4 })
     );
-    tvBody.position.set(0, 3.1, -11.2);
+    tvBody.position.set(TV.x, TV.screenY, TV.bodyZ);
     tvBody.castShadow = true;
     scene.add(tvBody);
     const tvCanvas = document.createElement("canvas");
@@ -645,7 +494,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     const tvTex = new THREE.CanvasTexture(tvCanvas);
     tvTex.colorSpace = THREE.SRGBColorSpace;
     const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 2.6), new THREE.MeshBasicMaterial({ map: tvTex }));
-    tvScreen.position.set(0, 3.1, -11.08);
+    tvScreen.position.set(TV.x, TV.screenY, TV.bodyZ + 0.12);
     scene.add(tvScreen);
 
     const drawTv = () => {
@@ -733,6 +582,16 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       }
       return null;
     };
+    // legacy back-wall slots (x = -10, -6, -2, 2, …) map onto free wall spots
+    const LEGACY_SLOTS = [-10.5, -6.5, 6.5, 10.5, 14.5, 21, -14.5, -21];
+    const hangFrame = (p: [number, number, number]): [number, number, number] => {
+      if (Math.abs(p[2] - WALL_ART.legacyBackZ) > 0.3) return p;
+      const k = Math.round((p[0] + 10) / 4);
+      const x = LEGACY_SLOTS[k] ?? Math.max(HALL.xMin + 1.5, Math.min(HALL.xMax - 1.5, p[0] * 1.4));
+      return [x, p[1], WALL_ART.backZ];
+    };
+    const hangPoster = (p: [number, number, number]): [number, number, number] =>
+      Math.abs(p[0] - WALL_ART.legacyRightX) > 0.3 ? p : [WALL_ART.rightX, p[1], Math.max(HALL.zMin + 1.5, Math.min(HALL.zMax - 1.5, p[2] * 1.3 + 8))];
     const rebuildFrames = () => {
       const { room: rm } = stateRef.current;
       while (frameGroup.children.length) {
@@ -756,7 +615,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         );
         art.position.z = 0.045;
         g.add(art);
-        g.position.set(...f.position);
+        g.position.set(...hangFrame(f.position));
         if (f.rotationY) g.rotation.y = f.rotationY;
         frameGroup.add(g);
       }
@@ -775,107 +634,15 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         edge.position.z = -0.025;
         g.add(edge, art);
         art.position.z = 0.005;
-        g.position.set(...p.position);
+        g.position.set(...hangPoster(p.position));
         g.rotation.y = -Math.PI / 2;
         frameGroup.add(g);
       }
     };
     rebuildFrames();
 
-    // lamps (two, for the long room)
-    const makeLamp = () => {
-      const lampGrp = new THREE.Group();
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 2.4, 10), new THREE.MeshStandardMaterial({ color: "#8a6f55" }));
-      pole.position.y = 1.2;
-      const shade = new THREE.Mesh(
-        new THREE.ConeGeometry(0.7, 0.75, 20, 1, true),
-        new THREE.MeshStandardMaterial({ color: "#ffe3b3", emissive: "#ffbe6b", emissiveIntensity: 0.7, side: THREE.DoubleSide })
-      );
-      shade.position.y = 2.55;
-      lampGrp.add(pole, shade);
-      lampGrp.traverse((o) => {
-        if (o instanceof THREE.Mesh) o.castShadow = true;
-      });
-      return lampGrp;
-    };
-    const lampA = makeLamp();
-    lampA.position.set(11.5, 0, 3.5);
-    scene.add(lampA);
-    const lampB = makeLamp();
-    lampB.position.set(-13.8, 0, 0.5);
-    scene.add(lampB);
-
-    const plantAt = (x: number, z: number) => {
-      const grp = new THREE.Group();
-      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.34, 0.6, 16), new THREE.MeshStandardMaterial({ color: "#e07a5f", roughness: 0.8 }));
-      pot.position.y = 0.3;
-      pot.castShadow = true;
-      grp.add(pot);
-      const leafMat = new THREE.MeshStandardMaterial({ color: "#6a9f6b", roughness: 0.8 });
-      const blobs: Array<[number, number, number, number]> = [[0, 1.2, 0, 0.55], [-0.32, 0.92, 0.12, 0.4], [0.32, 0.98, -0.12, 0.42]];
-      for (const [lx, ly, lz, r] of blobs) {
-        const b = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 12), leafMat);
-        b.position.set(lx, ly, lz);
-        b.castShadow = true;
-        grp.add(b);
-      }
-      grp.position.set(x, 0, z);
-      scene.add(grp);
-    };
-    plantAt(-12.5, 3.5);
-    plantAt(11.5, -9.5);
-    plantAt(-11, -9);
-
-    // bookshelf — fills the wide back wall
-    const shelf = new THREE.Group();
-    const woodMat = new THREE.MeshStandardMaterial({ color: "#b08d5f", roughness: 0.7 });
-    const shelfBody = new THREE.Mesh(new THREE.BoxGeometry(3.4, 3.6, 0.7), woodMat);
-    shelfBody.position.y = 1.8;
-    shelfBody.castShadow = shelfBody.receiveShadow = true;
-    shelf.add(shelfBody);
-    const bookCols = ["#ff8fab", "#9bf6ff", "#ffd6a5", "#caffbf", "#bdb2ff", "#ffc6ff", "#8ce8c0"];
-    for (let row = 0; row < 3; row++) {
-      const y = 0.9 + row * 1.05;
-      const inset = new THREE.Mesh(
-        new THREE.BoxGeometry(3.0, 0.9, 0.5),
-        new THREE.MeshStandardMaterial({ color: "#6b5844", roughness: 0.9 })
-      );
-      inset.position.set(0, y, 0.08);
-      shelf.add(inset);
-      let bx = -1.35;
-      let ci = row * 2;
-      while (bx < 1.25) {
-        const bw = 0.16 + ((ci * 37) % 10) / 60;
-        const bh = 0.62 + ((ci * 53) % 10) / 45;
-        const book = new THREE.Mesh(
-          new THREE.BoxGeometry(bw, bh, 0.4),
-          new THREE.MeshStandardMaterial({ color: bookCols[ci % bookCols.length], roughness: 0.8 })
-        );
-        book.position.set(bx + bw / 2, y - 0.42 + bh / 2, 0.12);
-        shelf.add(book);
-        bx += bw + 0.035;
-        ci++;
-      }
-    }
-    shelf.position.set(8.5, 0, -11.9);
-    scene.add(shelf);
-
-    // squishy floor cushions
-    const cushionAt = (x: number, z: number, color: string) => {
-      const c = new THREE.Mesh(
-        new THREE.SphereGeometry(0.72, 20, 16),
-        new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
-      );
-      c.scale.set(1, 0.42, 1);
-      c.position.set(x, 0.3, z);
-      c.castShadow = c.receiveShadow = true;
-      scene.add(c);
-    };
-    cushionAt(-4.2, 1.2, "#ffc6ff");
-    cushionAt(4.2, 1.6, "#9bf6ff");
-
-    // ── RPS arena (replaces the old green cushion) ──
-    const RPS_POS = { x: -10, z: -6.5 };
+    // ── RPS arena ──
+    const RPS_POS = RPS_SPOT.table;
     const woodDark = new THREE.MeshStandardMaterial({ color: "#8a6f55", roughness: 0.7 });
     const rpsTable = new THREE.Group();
     const rpsTop = new THREE.Mesh(
@@ -912,8 +679,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       st.position.set(x, 0, z);
       scene.add(st);
     };
-    stoolAt(-11.3, -5.2, "#ff8fab");
-    stoolAt(-8.7, -7.8, "#9bf6ff");
+    for (const st of RPS_SPOT.stools) stoolAt(st.x, st.z, st.color);
     // floating rock · paper · scissors badges above the table
     const rpsDeco: Array<{ sp: THREE.Sprite; phase: number }> = [];
     (["rock", "paper", "scissors"] as const).forEach((e, i) => {
@@ -952,7 +718,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       if (side < 0) face.rotation.y = Math.PI;
       boardGrp.add(face);
     }
-    boardGrp.position.set(-12.9, 0, -6.5);
+    boardGrp.position.set(RPS_SPOT.board.x, 0, RPS_SPOT.board.z);
     scene.add(boardGrp);
 
     const drawRps = () => {
@@ -1069,10 +835,10 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     sosTag.position.y = 1.95;
     sosTag.scale.set(1.1, 0.34, 1);
     sosGrp.add(sosTag);
-    sosGrp.position.set(5.0, 0, -10.0);
+    sosGrp.position.set(SOS_SPOT.x, 0, SOS_SPOT.z);
     scene.add(sosGrp);
     const sosLight = new THREE.PointLight("#ff3b3b", 3, 10, 2);
-    sosLight.position.set(5.0, 2.4, -10.0);
+    sosLight.position.set(SOS_SPOT.x, 2.4, SOS_SPOT.z);
     scene.add(sosLight);
 
     // ball
@@ -1087,6 +853,87 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     );
     ballMesh.add(ballStripe);
     scene.add(ballMesh);
+
+    // ── dodgeballs: one local simulation per server ball ──
+    // The server owns who holds / threw each ball (+ a rev per change); every
+    // client simulates flight with the shared physics and fast-forwards a
+    // fresh throw by its age on the server clock, so screens stay in step.
+    const dodgeGeo = new THREE.SphereGeometry(0.28, 24, 18);
+    const dodgeMat = new THREE.MeshStandardMaterial({ color: "#4cc9f0", roughness: 0.4 });
+    const dodgeSeam = new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.5 });
+    interface DodgeSim {
+      id: string;
+      body: { x: number; y: number; z: number; vx: number; vy: number; vz: number };
+      rev: number;
+      live: boolean;
+      /** my throw is flying locally until the server echo lands */
+      localUntil: number;
+      mesh: THREE.Group;
+      trail: THREE.Sprite;
+    }
+    const dodgeSims = new Map<string, DodgeSim>();
+    let myDodgeBall: string | null = null; // optimistic pickup
+    let myDodgeUntil = 0;
+    let lastDodgeHitAt = 0;
+    const noPickupUntil = new Map<string, number>();
+    const trailTex = (() => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 64;
+      const g = c.getContext("2d")!;
+      const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+      grad.addColorStop(0, "rgba(255,255,255,1)");
+      grad.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 64);
+      return new THREE.CanvasTexture(c);
+    })();
+    const makeDodgeMesh = () => {
+      const grp = new THREE.Group();
+      const core = new THREE.Mesh(dodgeGeo, dodgeMat);
+      core.castShadow = true;
+      grp.add(core);
+      for (const rot of [0, Math.PI / 2]) {
+        const seam = new THREE.Mesh(new THREE.TorusGeometry(0.281, 0.018, 6, 28), dodgeSeam);
+        seam.rotation.y = rot;
+        grp.add(seam);
+      }
+      const trail = new THREE.Sprite(new THREE.SpriteMaterial({ map: trailTex, color: "#4cc9f0", transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+      trail.scale.set(1.3, 1.3, 1);
+      grp.add(trail);
+      scene.add(grp);
+      return { grp, trail };
+    };
+    const FF_STEP = 1 / 60;
+    const fastForward = (sim: DodgeSim, seconds: number) => {
+      for (let t = 0; t < seconds; t += FF_STEP) {
+        const touched = stepBall(sim.body, FF_STEP);
+        if (touched & (TOUCH_FLOOR | TOUCH_SOLID | TOUCH_WALL)) sim.live = false;
+      }
+    };
+
+    // floating +1 / −1 over players when a hit lands
+    const popups: Array<{ sp: THREE.Sprite; id: string; born: number }> = [];
+    let lastFeedId = 0;
+    const makePopup = (text: string, color: string) => {
+      const c = document.createElement("canvas");
+      c.width = 192;
+      c.height = 96;
+      const g = c.getContext("2d")!;
+      g.font = "900 72px system-ui, sans-serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.lineWidth = 10;
+      g.strokeStyle = "rgba(40,30,55,0.85)";
+      g.strokeText(text, 96, 50);
+      g.fillStyle = color;
+      g.fillText(text, 96, 50);
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false }));
+      sp.scale.set(1.2, 0.6, 1);
+      scene.add(sp);
+      return sp;
+    };
 
     // ── avatars ──
     const rigs = new Map<string, AvatarRig>();
@@ -1107,8 +954,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
 
     // ── local physics state ──
     const me = {
-      x: (Math.random() - 0.5) * 10,
-      z: 6 + Math.random() * 2,
+      x: (Math.random() - 0.5) * 2 * SPAWN.xSpread,
+      z: SPAWN.zMin + Math.random() * (SPAWN.zMax - SPAWN.zMin),
       vx: 0,
       vz: 0,
       y: 0,
@@ -1348,7 +1195,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         // pickup
         const d = Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z);
         const speed = Math.hypot(ballPhys.vx, ballPhys.vz);
-        if (d < PICKUP_RADIUS && ballPhys.y < 0.9 && speed < 3 && !sitting) {
+        if (d < PICKUP_RADIUS && ballPhys.y < 0.9 && speed < 3 && !sitting && st.dodge.status !== "playing") {
           ballPhys.holderId = MY_ID;
           ballPhys.throwerId = null;
           ballPhys.thrownAt = 0;
@@ -1356,6 +1203,98 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           optimisticUntil = nowMs + 1500;
           cbRef.current.onBall({ ...ballPhys });
         }
+      }
+
+      // ── dodgeball court ──
+      {
+        const dg = st.dodge;
+        const serverNow = Date.now() + st.serverOffset;
+        const perf = performance.now();
+        const meRow = myId ? dg.roster[myId] : undefined;
+        const inRound = dg.status === "playing" && !!meRow && !meRow.left;
+        const seenIds = new Set<string>();
+        let holdingNet: string | null = null;
+        for (const nb of dg.balls) {
+          seenIds.add(nb.id);
+          let sim = dodgeSims.get(nb.id);
+          if (!sim) {
+            const { grp, trail } = makeDodgeMesh();
+            sim = { id: nb.id, body: { x: nb.x, y: nb.y, z: nb.z, vx: nb.vx, vy: nb.vy, vz: nb.vz }, rev: -1, live: false, localUntil: 0, mesh: grp, trail };
+            dodgeSims.set(nb.id, sim);
+          }
+          if (nb.holderId && nb.holderId === myId) holdingNet = nb.id;
+          if (nb.rev !== sim.rev) {
+            sim.rev = nb.rev;
+            const mineInFlight = perf < sim.localUntil && nb.holderId === myId; // stale pickup echo of my throw
+            if (!mineInFlight) {
+              sim.localUntil = 0;
+              sim.body.x = nb.x;
+              sim.body.y = nb.y;
+              sim.body.z = nb.z;
+              sim.body.vx = nb.vx;
+              sim.body.vy = nb.vy;
+              sim.body.vz = nb.vz;
+              ejectBall(sim.body);
+              sim.live = !nb.holderId && !nb.spent && !!nb.throwerId;
+              if (!nb.holderId && nb.thrownAt) fastForward(sim, Math.min(1.2, Math.max(0, (serverNow - nb.thrownAt) / 1000)));
+            }
+          }
+          const flyingLocally = perf < sim.localUntil;
+          if (nb.holderId && !flyingLocally) continue; // carried: rendered at a hand
+          if (nb.spent) sim.live = false;
+          if (serverNow - nb.thrownAt > DODGE_LIVE_MS) sim.live = false;
+          const wasLive = sim.live;
+          const touched = stepBall(sim.body, dt);
+          if (touched & (TOUCH_FLOOR | TOUCH_SOLID | TOUCH_WALL)) sim.live = false;
+          // the thrower's screen calls a throw dead the moment it lands
+          if (wasLive && !sim.live && nb.throwerId === myId && !flyingLocally) cbRef.current.onDodgeSpend(nb.id, nb.rev);
+
+          if (!inRound || flyingLocally) continue;
+          const dx = me.x - sim.body.x;
+          const dz = me.z - sim.body.z;
+          const dist = Math.hypot(dx, dz);
+          // hit: a live throw from someone else reaches my body
+          if (
+            sim.live &&
+            nb.throwerId &&
+            nb.throwerId !== myId &&
+            dist < 0.62 &&
+            sim.body.y > me.y + 0.05 &&
+            sim.body.y < me.y + 1.75 &&
+            Date.now() - lastDodgeHitAt > DODGE_SHIELD_MS
+          ) {
+            sim.live = false;
+            lastDodgeHitAt = Date.now();
+            selfHitAt = Date.now();
+            cbRef.current.onDodgeHit(nb.id, { x: sim.body.x, y: sim.body.y, z: sim.body.z, vx: sim.body.vx, vz: sim.body.vz });
+            sim.body.vx *= -0.25;
+            sim.body.vz *= -0.25;
+            sim.body.vy = 2.4;
+          }
+          // pickup: walk over a resting ball (one at a time)
+          const busy = holdingNet !== null || (myDodgeBall !== null && perf < myDodgeUntil);
+          const speed = Math.hypot(sim.body.vx, sim.body.vz);
+          const blocked = (noPickupUntil.get(nb.id) ?? 0) > perf || (nb.throwerId !== myId && serverNow - nb.thrownAt < 350);
+          if (!busy && !nb.holderId && !sitting && !blocked && dist < PICKUP_RADIUS && sim.body.y < 0.9 && speed < 3) {
+            myDodgeBall = nb.id;
+            myDodgeUntil = perf + 1500;
+            cbRef.current.onDodgePickup(nb.id);
+          }
+        }
+        for (const [id, sim] of dodgeSims) {
+          if (seenIds.has(id)) continue;
+          scene.remove(sim.mesh);
+          (sim.trail.material as THREE.SpriteMaterial).dispose();
+          dodgeSims.delete(id);
+        }
+        // optimistic pickup settles: confirmed, taken by someone else, or timed out
+        if (myDodgeBall) {
+          const nb = dg.balls.find((b) => b.id === myDodgeBall);
+          if (!nb || (nb.holderId && nb.holderId !== myId) || (!nb.holderId && performance.now() > myDodgeUntil) || holdingNet === myDodgeBall) {
+            if (holdingNet !== myDodgeBall) myDodgeBall = null;
+          }
+        }
+        if (dg.status !== "playing") myDodgeBall = null;
       }
 
       // ── dodgeball bonk: fast free ball, thrown by a friend, meets me ──
@@ -1441,36 +1380,42 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         cbRef.current.onNear(nearId, nearName);
       }
 
-      // ── contextual zones with hysteresis ─────────────────────────────
+      // ── contextual zones with hysteresis (lib/hall-layout ZONES) ──────
       // Enter radius < exit radius per zone: crossing a boundary can't
-      // flutter the ACT button anymore. Zones are also spaced apart now
-      // (sofa moved back to z=7, game rug stays at z=2.2).
-      const dGame = Math.hypot(me.x, me.z - 2.2);
-      const nearGame = lastCtx.nearGame ? dGame < 3.9 : dGame < 3.2;
-      const dxSofa = Math.abs(me.x);
-      const dzSofa = Math.abs(me.z - 7.0);
+      // flutter the ACT button.
+      const near = (z: { x: number; z: number; enter: number; exit: number }, was: boolean) =>
+        Math.hypot(me.x - z.x, me.z - z.z) < (was ? z.exit : z.enter);
+      const nearGame = near(ZONES.game, lastCtx.nearGame);
+      const dxSofa = Math.abs(me.x - ZONES.sofa.x);
+      const dzSofa = Math.abs(me.z - ZONES.sofa.z);
       const nearSofa = lastCtx.nearSofa
-        ? dxSofa < 4.4 && dzSofa < 2.6
-        : dxSofa < 3.8 && dzSofa < 2.0;
-      const dTv = Math.hypot(me.x, me.z + 9.6);
-      const nearTv = lastCtx.nearTv ? dTv < 4.3 : dTv < 3.6;
-      const dRps = Math.hypot(me.x + 10, me.z + 6.5);
-      const nearRps = lastCtx.nearRps ? dRps < 3.4 : dRps < 2.8;
-      const dSos = Math.hypot(me.x - 5.0, me.z + 10.0);
-      const nearEmergency = lastCtx.nearEmergency ? dSos < 3.0 : dSos < 2.4;
+        ? dxSofa < ZONES.sofa.hxExit && dzSofa < ZONES.sofa.hzExit
+        : dxSofa < ZONES.sofa.hxEnter && dzSofa < ZONES.sofa.hzEnter;
+      const nearTv = near(ZONES.tv, lastCtx.nearTv);
+      const nearRps = near(ZONES.rps, lastCtx.nearRps);
+      const nearEmergency = near(ZONES.sos, lastCtx.nearEmergency);
+      const nearDodgePad = near(ZONES.dodgePad, lastCtx.nearDodgePad);
+      const lobbyActive = st.dodge.status !== "playing";
       const dBall = Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z);
-      const nearBall = lastCtx.nearBall ? dBall < 2.0 : dBall < 1.5;
+      const nearBall = lobbyActive && (lastCtx.nearBall ? dBall < 2.0 : dBall < 1.5);
+      const holdingDodge =
+        st.dodge.status === "playing" &&
+        (st.dodge.balls.some((b) => b.holderId === myId && performance.now() >= (dodgeSims.get(b.id)?.localUntil ?? 0)) || myDodgeBall !== null);
       const ctx: ContextState = {
         nearSofa,
         nearBall,
-        holdingBall: ballPhys.holderId === MY_ID,
+        holdingBall: lobbyActive && ballPhys.holderId === MY_ID,
         nearTv,
         nearGame,
         nearRps,
         nearEmergency,
+        nearDodgePad,
+        holdingDodge,
       };
       lastCtx = ctx;
-      const ctxSig = `${ctx.nearSofa ? 1 : 0}${ctx.nearBall ? 1 : 0}${ctx.holdingBall ? 1 : 0}${ctx.nearTv ? 1 : 0}${ctx.nearGame ? 1 : 0}${ctx.nearRps ? 1 : 0}${ctx.nearEmergency ? 1 : 0}`;
+      const ctxSig = [ctx.nearSofa, ctx.nearBall, ctx.holdingBall, ctx.nearTv, ctx.nearGame, ctx.nearRps, ctx.nearEmergency, ctx.nearDodgePad, ctx.holdingDodge]
+        .map((v) => (v ? 1 : 0))
+        .join("");
       if (ctxSig !== lastCtxSig) {
         lastCtxSig = ctxSig;
         cbRef.current.onContext(ctx);
@@ -1654,6 +1599,85 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       }
       ballMesh.rotation.x += dt * (Math.hypot(ballPhys.vx, ballPhys.vz) * 1.6 + 0.4);
       ballMesh.rotation.z += dt * 0.5;
+      ballMesh.visible = st.dodge.status !== "playing";
+
+      // ── dodgeballs ──
+      {
+        const dg = st.dodge;
+        for (const nb of dg.balls) {
+          const sim = dodgeSims.get(nb.id);
+          if (!sim) continue;
+          const flyingLocally = performance.now() < sim.localUntil;
+          const holder = flyingLocally ? null : nb.holderId === st.mySocketId || (myDodgeBall === nb.id && !nb.holderId) ? MY_ID : nb.holderId;
+          if (holder === MY_ID) {
+            handPoint(me.x, me.y, me.z, me.facing, hand);
+          } else if (holder && rigs.get(holder)) {
+            const rig = rigs.get(holder)!;
+            handPoint(rig.group.position.x, rig.group.position.y, rig.group.position.z, rig.group.rotation.y, hand);
+          } else {
+            hand.x = sim.body.x;
+            hand.y = sim.body.y;
+            hand.z = sim.body.z;
+          }
+          sim.mesh.position.set(hand.x, hand.y, hand.z);
+          const spin = Math.hypot(sim.body.vx, sim.body.vz);
+          sim.mesh.rotation.x += dt * (spin * 2.2 + 0.3);
+          sim.mesh.rotation.y += dt * 0.6;
+          const tm = sim.trail.material as THREE.SpriteMaterial;
+          const thrower = nb.throwerId ? st.players[nb.throwerId === st.mySocketId ? MY_ID : nb.throwerId] : undefined;
+          if (sim.live && thrower) tm.color.set(thrower.color);
+          tm.opacity += ((sim.live ? 0.85 : 0) - tm.opacity) * Math.min(1, dt * 12);
+        }
+
+        // +1 / −1 popups for fresh hits
+        for (const h of dg.feed) {
+          if (h.id <= lastFeedId) continue;
+          lastFeedId = h.id;
+          if (Date.now() + st.serverOffset - h.at > 3000) continue;
+          popups.push({ sp: makePopup("+1", "#8ce8c0"), id: h.by, born: elapsed });
+          popups.push({ sp: makePopup("−1", "#ff8a8a"), id: h.victim, born: elapsed });
+        }
+        for (let i = popups.length - 1; i >= 0; i--) {
+          const p = popups[i];
+          const age = elapsed - p.born;
+          const rig = rigs.get(p.id === st.mySocketId ? MY_ID : p.id);
+          if (age > 1.4 || !rig) {
+            scene.remove(p.sp);
+            p.sp.material.map?.dispose();
+            p.sp.material.dispose();
+            popups.splice(i, 1);
+            continue;
+          }
+          p.sp.position.set(rig.group.position.x, rig.group.position.y + 2.5 + age * 0.9, rig.group.position.z);
+          p.sp.material.opacity = age < 1 ? 1 : 1 - (age - 1) / 0.4;
+          const pop = 1 + Math.max(0, 0.25 - age) * 2;
+          p.sp.scale.set(1.2 * pop, 0.6 * pop, 1);
+        }
+
+        // court scoreboard + corner lights follow the round
+        if (dg.status !== courtMode) {
+          courtMode = dg.status;
+          env.setCourtMode(courtMode);
+        }
+        const serverNow = Date.now() + st.serverOffset;
+        let onCourt = 0;
+        if (dg.status === "countdown") {
+          if (inCourt(me.x, me.z, 0.2)) onCourt++;
+          for (const [id, p] of Object.entries(st.players)) if (id !== MY_ID && inCourt(p.x, p.z, 0.2)) onCourt++;
+        }
+        const boardSig = [
+          dg.status,
+          dg.status === "idle" ? 0 : Math.ceil(((dg.status === "countdown" ? dg.startsAt : dg.endsAt) - serverNow) / 1000),
+          onCourt,
+          Object.values(dg.roster).map((r) => `${r.hits}.${r.taken}.${r.left ? 1 : 0}`).join(","),
+          dg.ranking.length,
+        ].join("|");
+        if (boardSig !== lastBoardSig) {
+          lastBoardSig = boardSig;
+          env.drawCourtBoard(dg, serverNow, onCourt);
+        }
+      }
+      env.tick(elapsed, dt);
 
       // ── star collectibles ──
       const starSeen = new Set<string>();
@@ -1714,19 +1738,23 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
 
       // ── camera follow: both the position AND the gaze point are damped,
       // so the frame glides instead of shaking ──
-      const tx = me.x * 0.55;
-      const tz = me.z * 0.55 + 2.4;
+      const tx = me.x * 0.72;
+      const tz = me.z * 0.7 + 2.4;
       desired.set(tx, camDist * 0.64, tz + camDist * 0.6);
       camera.position.lerp(desired, Math.min(1, dt * 4));
       lookSm.x += (tx - lookSm.x) * Math.min(1, dt * 4);
       lookSm.y += (1.0 - lookSm.y) * Math.min(1, dt * 4);
       lookSm.z += (tz - 4 - lookSm.z) * Math.min(1, dt * 4);
       camera.lookAt(lookSm);
+      sun.position.set(lookSm.x + 10, 16, lookSm.z + 10);
+      sun.target.position.set(lookSm.x, 0, lookSm.z);
+      sun.target.updateMatrixWorld();
 
       // ── in-world prompt: project the current action's anchor to screen ──
       const pk = actionKey(lastCtx, {
         sitting: st.players[MY_ID]?.sitting ?? me.sitting,
         gameStatus: st.game.status,
+        dodgeStatus: st.dodge.status,
       });
       if (pk) {
         actionAnchor(pk, me, anchorWorld);
@@ -1738,9 +1766,6 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       } else {
         promptAnchor.key = null;
       }
-
-      // lamp flicker (barely)
-      lampLight.intensity = 18 + Math.sin(elapsed * 7.3) * 0.35;
 
       renderer.render(scene, camera);
     };
@@ -1788,6 +1813,46 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
 
     // expose toss to parent via ballPhys mutation
     const doToss = () => {
+      const st = stateRef.current;
+      const dg = st.dodge;
+      const myId = st.mySocketId;
+      const carried = dg.status === "playing" ? dg.balls.find((b) => b.holderId === myId || b.id === myDodgeBall) : undefined;
+      const sim = carried ? dodgeSims.get(carried.id) : undefined;
+      if (carried && sim) {
+        // aim assist: snap to an opponent inside a narrow cone ahead of you
+        let yaw = me.facing;
+        let bestScore = Infinity;
+        for (const [id, p] of Object.entries(st.players)) {
+          if (id === MY_ID || !dg.roster[id] || dg.roster[id].left) continue;
+          const d = Math.hypot(p.x - me.x, p.z - me.z);
+          if (d > AIM_RANGE || d < 0.5) continue;
+          const a = Math.atan2(p.x - me.x, p.z - me.z);
+          let diff = a - me.facing;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          if (Math.abs(diff) > AIM_CONE) continue;
+          const score = Math.abs(diff) * 6 + d;
+          if (score < bestScore) {
+            bestScore = score;
+            yaw = a;
+          }
+        }
+        handPoint(me.x, me.y, me.z, yaw, hand, 0.6, 1.05);
+        sim.body.x = hand.x;
+        sim.body.y = hand.y;
+        sim.body.z = hand.z;
+        sim.body.vx = Math.sin(yaw) * DODGE_THROW_SPEED;
+        sim.body.vz = Math.cos(yaw) * DODGE_THROW_SPEED;
+        sim.body.vy = DODGE_THROW_LIFT;
+        sim.live = true;
+        sim.localUntil = performance.now() + 700;
+        me.facing = yaw;
+        myDodgeBall = null;
+        noPickupUntil.set(carried.id, performance.now() + 700);
+        cbRef.current.onDodgeThrow(carried.id, { ...sim.body });
+        return;
+      }
+      if (dg.status === "playing") return;
       if (ballPhys.holderId === MY_ID || Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z) < 1.2) {
         const f = me.facing;
         ballPhys.holderId = null;
@@ -1924,6 +1989,9 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
       document.removeEventListener("gesturestart", blockPageZoom);
       document.removeEventListener("gesturechange", blockPageZoom);
       if (joy.owner === "canvas") resetJoy();
+      env.dispose();
+      for (const sim of dodgeSims.values()) scene.remove(sim.mesh);
+      for (const p of popups) scene.remove(p.sp);
       renderer.dispose();
       mount.removeChild(renderer.domElement);
       scene.traverse((o) => {

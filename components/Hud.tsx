@@ -37,6 +37,7 @@ interface Props {
   gameStatus?: string;
   rpsStatus?: string;
   rpsSeat?: "a" | "b" | null;
+  dodgeStatus?: string;
   unreadCount?: number;
   chatOpen?: boolean;
   voiceStatus?: VoiceStatus;
@@ -52,6 +53,8 @@ interface Props {
   onToggleTv: () => void;
   /** star scramble starts from the rug (ACT / E) — it has no menu button */
   onStartGame: () => void;
+  /** dodgeball starts from the court's pad (ACT / E) — no menu button either */
+  onStartDodge: () => void;
   onToggleVoice: () => void;
   onToggleRps: () => void;
   onRpsAct: () => void;
@@ -78,6 +81,7 @@ export default function Hud(p: Props) {
     gameStatus: p.gameStatus,
     rpsStatus: p.rpsStatus,
     rpsSeat: p.rpsSeat,
+    dodgeStatus: p.dodgeStatus,
   });
   const run = (key: ActionKey) => {
     if (key === "sos") p.onSos();
@@ -85,6 +89,7 @@ export default function Hud(p: Props) {
     else if (key === "addLink") p.onOpenAddLink();
     else if (key === "duel") p.onRpsAct();
     else if (key === "starGame") p.onStartGame();
+    else if (key === "dodge") p.onStartDodge();
     else p.onSofaSit(); // sit / stand
   };
   const interaction = useInteraction(action, run);

@@ -21,6 +21,7 @@ import { Confetti } from "@phosphor-icons/react/dist/csr/Confetti";
 import { CornersIn } from "@phosphor-icons/react/dist/csr/CornersIn";
 import { CornersOut } from "@phosphor-icons/react/dist/csr/CornersOut";
 import { Couch } from "@phosphor-icons/react/dist/csr/Couch";
+import { Crown } from "@phosphor-icons/react/dist/csr/Crown";
 import { DeviceRotate } from "@phosphor-icons/react/dist/csr/DeviceRotate";
 import { DiceFive } from "@phosphor-icons/react/dist/csr/DiceFive";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
@@ -35,6 +36,7 @@ import { HandsClapping } from "@phosphor-icons/react/dist/csr/HandsClapping";
 import { HandTap } from "@phosphor-icons/react/dist/csr/HandTap";
 import { HandWaving } from "@phosphor-icons/react/dist/csr/HandWaving";
 import { Headphones } from "@phosphor-icons/react/dist/csr/Headphones";
+import { HourglassHigh } from "@phosphor-icons/react/dist/csr/HourglassHigh";
 import { House } from "@phosphor-icons/react/dist/csr/House";
 import { Image as ImageGlyph } from "@phosphor-icons/react/dist/csr/Image";
 import { Info } from "@phosphor-icons/react/dist/csr/Info";
@@ -54,6 +56,7 @@ import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { Popcorn } from "@phosphor-icons/react/dist/csr/Popcorn";
 import { Robot } from "@phosphor-icons/react/dist/csr/Robot";
 import { Scroll } from "@phosphor-icons/react/dist/csr/Scroll";
+import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { SignOut } from "@phosphor-icons/react/dist/csr/SignOut";
 import { Siren } from "@phosphor-icons/react/dist/csr/Siren";
 import { SkipBack } from "@phosphor-icons/react/dist/csr/SkipBack";
@@ -63,12 +66,14 @@ import { SoccerBall } from "@phosphor-icons/react/dist/csr/SoccerBall";
 import { Sparkle } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { SpeakerHigh } from "@phosphor-icons/react/dist/csr/SpeakerHigh";
 import { Star } from "@phosphor-icons/react/dist/csr/Star";
+import { Target } from "@phosphor-icons/react/dist/csr/Target";
 import { Television } from "@phosphor-icons/react/dist/csr/Television";
 import { Timer } from "@phosphor-icons/react/dist/csr/Timer";
 import { Trophy } from "@phosphor-icons/react/dist/csr/Trophy";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { User } from "@phosphor-icons/react/dist/csr/User";
 import { Users } from "@phosphor-icons/react/dist/csr/Users";
+import { Volleyball } from "@phosphor-icons/react/dist/csr/Volleyball";
 import { Warning } from "@phosphor-icons/react/dist/csr/Warning";
 import { Waveform } from "@phosphor-icons/react/dist/csr/Waveform";
 import { Wrench } from "@phosphor-icons/react/dist/csr/Wrench";
@@ -79,6 +84,7 @@ const ICONS = {
   sit: Chair,
   sofa: Couch,
   toss: SoccerBall,
+  dodge: Volleyball,
   addLink: LinkSimple,
   duel: HandFist,
   starGame: Star,
@@ -109,6 +115,10 @@ const ICONS = {
   video: FilmSlate,
   // results & moments
   trophy: Trophy,
+  crown: Crown,
+  target: Target,
+  shield: ShieldCheck,
+  hourglass: HourglassHigh,
   medal: Medal,
   confetti: Confetti,
   dice: DiceFive,

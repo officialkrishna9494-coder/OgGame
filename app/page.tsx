@@ -10,6 +10,7 @@ import dynamic from "next/dynamic";
 import AuthGate from "../components/AuthGate";
 import AddLinkPanel from "../components/AddLinkPanel";
 import ChatPanel from "../components/ChatPanel";
+import DodgePanel from "../components/DodgePanel";
 import GamePanel from "../components/GamePanel";
 import RpsPanel from "../components/RpsPanel";
 import SosAlert from "../components/SosAlert";
@@ -50,7 +51,9 @@ function HallClient({ me }: { me: Identity }) {
   const voice = useVoice(me);
 
   const socket = useHallSocket(me);
-  const { players, ball, tv, game, rps, sos, toasts, simulated, mySocketId } = socket.snapshot;
+  const { players, ball, tv, game, rps, sos, dodge, serverOffset, toasts, simulated, mySocketId } = socket.snapshot;
+  // startsAt of the dodgeball round this player hid (0 = none hidden)
+  const [dodgeHiddenRound, setDodgeHiddenRound] = useState(0);
   const chat = useChat();
   const unreadCount = chat.messages.filter((m) => m.at > chatSeenAt && m.name !== me.name).length;
 
@@ -92,6 +95,22 @@ function HallClient({ me }: { me: Identity }) {
     }
   }, [rps]);
 
+  // dodgeball sounds: jingle when the round starts, pop on every hit, fanfare at the end
+  const lastDodgeStatus = useRef(dodge.status);
+  const lastDodgeFeed = useRef(0);
+  useEffect(() => {
+    const newest = dodge.feed.length ? dodge.feed[dodge.feed.length - 1].id : 0;
+    if (newest > lastDodgeFeed.current) {
+      if (lastDodgeFeed.current !== 0 || dodge.status === "playing") popSfx();
+      lastDodgeFeed.current = newest;
+    }
+    if (dodge.status !== lastDodgeStatus.current) {
+      if (dodge.status === "playing") startSfx();
+      if (dodge.status === "ended") winSfx();
+      lastDodgeStatus.current = dodge.status;
+    }
+  }, [dodge]);
+
   // SOS overlay: pure render gate (SosAlert self-dismisses after 3s).
   // Shows while the alarm is fresh and not manually stood down.
   const showSos = !!sos && sosDismissedAt < sos.at;
@@ -129,6 +148,14 @@ function HallClient({ me }: { me: Identity }) {
       return;
     }
     socket.startGame();
+  }, [socket, simulated]);
+  // ACT / E on the court's start pad kicks off a dodgeball countdown
+  const handleStartDodge = useCallback(() => {
+    if (simulated) {
+      socket.pushToast("dodgeball needs the live hall server", "offline");
+      return;
+    }
+    socket.startDodge();
   }, [socket, simulated]);
   const toggleChat = useCallback(() => {
     setChatOpen((v) => !v);
@@ -175,6 +202,8 @@ function HallClient({ me }: { me: Identity }) {
   // round runs and through its results, unless this player hid that round
   const gameLive = game.status === "playing" || game.status === "ended";
   const showGame = gameLive && gameHiddenRound !== game.endsAt;
+  // same for dodgeball: countdown → live standings → results, per-round hide
+  const showDodge = dodge.status !== "idle" && dodgeHiddenRound !== dodge.startsAt;
   const rpsSeat = !mySocketId ? null : rps.seats.a === mySocketId ? "a" : rps.seats.b === mySocketId ? "b" : null;
 
   return (
@@ -190,12 +219,18 @@ function HallClient({ me }: { me: Identity }) {
         game={game}
         rps={rps}
         sos={sos}
+        dodge={dodge}
+        serverOffset={serverOffset}
         onMove={handleMove}
         onBall={handleBall}
         onNear={handleNear}
         onContext={handleContext}
         onCollect={handleCollect}
         onHit={handleHit}
+        onDodgePickup={socket.pickupDodge}
+        onDodgeThrow={socket.throwDodge}
+        onDodgeSpend={socket.spendDodge}
+        onDodgeHit={socket.hitDodge}
       />
 
       {/* soft vignette for coziness */}
@@ -216,6 +251,7 @@ function HallClient({ me }: { me: Identity }) {
         gameStatus={game.status}
         rpsStatus={rps.status}
         rpsSeat={rpsSeat}
+        dodgeStatus={dodge.status}
         unreadCount={unreadCount || undefined}
         chatOpen={chatOpen}
         voiceStatus={voice.status}
@@ -230,6 +266,7 @@ function HallClient({ me }: { me: Identity }) {
         onToss={() => hallToss.fn?.()}
         onToggleTv={() => setTvOpen((v) => !v)}
         onStartGame={handleStartGame}
+        onStartDodge={handleStartDodge}
         onToggleVoice={() => setVoiceOpen((v) => !v)}
         onToggleRps={() => setRpsOpen((v) => !v)}
         onRpsAct={handleRpsAct}
@@ -240,6 +277,17 @@ function HallClient({ me }: { me: Identity }) {
 
       {showGame && (
         <GamePanel game={game} compact={mobile} onStart={handleStartGame} onClose={() => setGameHiddenRound(game.endsAt)} />
+      )}
+
+      {showDodge && (
+        <DodgePanel
+          dodge={dodge}
+          serverOffset={serverOffset}
+          mySocketId={mySocketId}
+          players={players}
+          compact={mobile}
+          onClose={() => setDodgeHiddenRound(dodge.startsAt)}
+        />
       )}
 
       {rpsOpen && (

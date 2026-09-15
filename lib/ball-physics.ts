@@ -54,6 +54,43 @@ interface Contact {
 }
 
 const scratch: Contact = { nx: 0, ny: 0, nz: 0, depth: 0 };
+
+/** what a step touched — lets games tell a "live" throw from a dead one */
+export const TOUCH_FLOOR = 1;
+export const TOUCH_SOLID = 2;
+export const TOUCH_WALL = 4;
+
+// ─── spatial buckets ─────────────────────────────────────────────────────────
+// The hall has dozens of props and a round can have ten balls, so each lookup
+// only visits the props whose (radius-inflated) footprint covers that 2 m cell.
+const BUCKET = 2;
+const BX0 = BALL_BOUNDS.xMin - BUCKET;
+const BZ0 = BALL_BOUNDS.zMin - BUCKET;
+const BW = Math.ceil((BALL_BOUNDS.xMax - BALL_BOUNDS.xMin + 2 * BUCKET) / BUCKET);
+const BH = Math.ceil((BALL_BOUNDS.zMax - BALL_BOUNDS.zMin + 2 * BUCKET) / BUCKET);
+const bucketOf = (x: number, z: number) => {
+  const gx = Math.min(BW - 1, Math.max(0, Math.floor((x - BX0) / BUCKET)));
+  const gz = Math.min(BH - 1, Math.max(0, Math.floor((z - BZ0) / BUCKET)));
+  return gz * BW + gx;
+};
+function bucketize<T>(items: T[], extent: (t: T) => [number, number, number, number], pad: number): T[][] {
+  const out: T[][] = Array.from({ length: BW * BH }, () => []);
+  for (const it of items) {
+    const [x0, x1, z0, z1] = extent(it);
+    const gx0 = Math.max(0, Math.floor((x0 - pad - BX0) / BUCKET));
+    const gx1 = Math.min(BW - 1, Math.floor((x1 + pad - BX0) / BUCKET));
+    const gz0 = Math.max(0, Math.floor((z0 - pad - BZ0) / BUCKET));
+    const gz1 = Math.min(BH - 1, Math.floor((z1 + pad - BZ0) / BUCKET));
+    for (let gz = gz0; gz <= gz1; gz++) for (let gx = gx0; gx <= gx1; gx++) out[gz * BW + gx].push(it);
+  }
+  return out;
+}
+const solidBuckets = bucketize(
+  SOLIDS,
+  (s) => (s.shape === "box" ? [s.x - s.hx, s.x + s.hx, s.z - s.hz, s.z + s.hz] : [s.x - s.r, s.x + s.r, s.z - s.r, s.z + s.r]),
+  0.3
+);
+const colliderBuckets = bucketize(COLLIDERS, (c) => [c.x - c.hx, c.x + c.hx, c.z - c.hz, c.z + c.hz], 0.4);
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 const inBoundsXZ = (x: number, z: number) =>
   x >= BALL_BOUNDS.xMin && x <= BALL_BOUNDS.xMax && z >= BALL_BOUNDS.zMin && z <= BALL_BOUNDS.zMax;
@@ -137,25 +174,32 @@ function contact(x: number, y: number, z: number, s: Solid, out: Contact): boole
   return true;
 }
 
-function keepInBounds(b: BallBody) {
+function keepInBounds(b: BallBody): number {
+  let hit = 0;
   if (b.x < BALL_BOUNDS.xMin) {
     b.x = BALL_BOUNDS.xMin;
     if (b.vx < 0) b.vx *= -WALL_BOUNCE;
+    hit = TOUCH_WALL;
   } else if (b.x > BALL_BOUNDS.xMax) {
     b.x = BALL_BOUNDS.xMax;
     if (b.vx > 0) b.vx *= -WALL_BOUNCE;
+    hit = TOUCH_WALL;
   }
   if (b.z < BALL_BOUNDS.zMin) {
     b.z = BALL_BOUNDS.zMin;
     if (b.vz < 0) b.vz *= -WALL_BOUNCE;
+    hit = TOUCH_WALL;
   } else if (b.z > BALL_BOUNDS.zMax) {
     b.z = BALL_BOUNDS.zMax;
     if (b.vz > 0) b.vz *= -WALL_BOUNCE;
+    hit = TOUCH_WALL;
   }
+  return hit;
 }
 
-/** Advance a free (un-held) ball by dt seconds. */
-export function stepBall(b: BallBody, dt: number): void {
+/** Advance a free (un-held) ball by dt seconds. Returns TOUCH_* flags. */
+export function stepBall(b: BallBody, dt: number): number {
+  let touched = 0;
   // sanitize: bad network data must never launch the ball through the map
   if (!Number.isFinite(b.x + b.y + b.z + b.vx + b.vy + b.vz)) {
     b.vx = b.vy = b.vz = 0;
@@ -194,11 +238,16 @@ export function stepBall(b: BallBody, dt: number): void {
         b.vy = 0;
       }
       onFloor = true;
+      touched |= TOUCH_FLOOR;
     }
-    keepInBounds(b);
+    touched |= keepInBounds(b);
 
-    for (const s of SOLIDS) {
+    // iterative solve: props and the hall's edges settle together, so a
+    // ball squeezed between two of them can't be shoved back into either
+    for (let pass = 0; pass < 3; pass++) {
+    for (const s of solidBuckets[bucketOf(b.x, b.z)]) {
       if (!contact(b.x, b.y, b.z, s, scratch)) continue;
+      touched |= TOUCH_SOLID;
       const { nx, ny, nz, depth } = scratch;
       b.x += nx * depth;
       b.y += ny * depth;
@@ -224,7 +273,8 @@ export function stepBall(b: BallBody, dt: number): void {
         b.vz -= (1 + PROP_BOUNCE) * vn * nz;
       }
     }
-    keepInBounds(b);
+    touched |= keepInBounds(b);
+    }
   }
 
   const drag = Math.exp(-AIR_DRAG * dt);
@@ -232,12 +282,11 @@ export function stepBall(b: BallBody, dt: number): void {
   b.vz *= drag;
 
   if (top) {
-    // roll off toward the middle of the room — never stranded on furniture
-    const dx = -b.x;
-    const dz = -b.z;
-    const d = Math.hypot(dx, dz) || 1;
-    b.vx += (dx / d) * ROLL_OFF * dt;
-    b.vz += (dz / d) * ROLL_OFF * dt;
+    // roll off the nearest open edge — never stranded on furniture
+    if (rollOffDir(b, top, rollDir)) {
+      b.vx += rollDir.x * ROLL_OFF * dt;
+      b.vz += rollDir.z * ROLL_OFF * dt;
+    }
   } else if (onFloor && b.vy === 0) {
     const field = reachField();
     const cell = field.cellAt(b.x, b.z);
@@ -256,14 +305,56 @@ export function stepBall(b: BallBody, dt: number): void {
       b.vz *= f;
     }
   }
+  return touched;
+}
+
+// ─── rolling off furniture tops ──────────────────────────────────────────────
+// March outward in 16 directions at the ball's height; the shortest path that
+// leaves the top's footprint without running into a taller prop wins.
+const rollDir = { x: 0, z: 0 };
+const ROLL_DIRS = Array.from({ length: 16 }, (_, i) => [Math.cos((i / 16) * Math.PI * 2), Math.sin((i / 16) * Math.PI * 2)]);
+
+function offTop(x: number, z: number, s: Solid): boolean {
+  return s.shape === "box"
+    ? Math.abs(x - s.x) > s.hx + BALL_RADIUS * 0.6 || Math.abs(z - s.z) > s.hz + BALL_RADIUS * 0.6
+    : Math.hypot(x - s.x, z - s.z) > s.r + BALL_RADIUS * 0.6;
+}
+
+function rollOffDir(b: BallBody, top: Solid, out: { x: number; z: number }): boolean {
+  let best = Infinity;
+  const y = b.y + 0.02;
+  for (const [dx, dz] of ROLL_DIRS) {
+    for (let t = 0.15; t < 8; t += 0.15) {
+      const x = b.x + dx * t;
+      const z = b.z + dz * t;
+      if (!inBoundsXZ(x, z)) break;
+      let blocked = false;
+      for (const s of solidBuckets[bucketOf(x, z)]) {
+        if (s !== top && contact(x, y, z, s, scratch) && scratch.ny < 0.7) {
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) break;
+      if (offTop(x, z, top)) {
+        if (t < best) {
+          best = t;
+          out.x = dx;
+          out.z = dz;
+        }
+        break;
+      }
+    }
+  }
+  return best < Infinity;
 }
 
 // ─── never out of reach ──────────────────────────────────────────────────────
-// A floor grid (10 cm) built once, lazily: `reach` marks spots a player can
+// A floor grid (15 cm) built once, lazily: `reach` marks spots a player can
 // get within PICKUP_RADIUS of (using the same COLLIDERS that block players),
 // and `flow` points every other spot the ball can occupy toward the nearest
 // reachable one — a breadth-first path that goes around the furniture.
-const CELL = 0.1;
+const CELL = 0.15;
 const RESCUE_SPEED = 1.2;
 const RESCUE_ACCEL = 4;
 const PLAYER_RADIUS = 0.38;
@@ -279,7 +370,7 @@ let field: ReachField | null = null;
 
 function playerCanStand(x: number, z: number): boolean {
   if (Math.abs(x) > HALL_BOUNDS.x || z < HALL_BOUNDS.zMin || z > HALL_BOUNDS.zMax) return false;
-  for (const c of COLLIDERS) {
+  for (const c of colliderBuckets[bucketOf(x, z)]) {
     const cx = clamp(x, c.x - c.hx, c.x + c.hx);
     const cz = clamp(z, c.z - c.hz, c.z + c.hz);
     const dx = x - cx;
@@ -381,12 +472,12 @@ export function reachField(): ReachField {
 /** Push a ball out of any furniture / walls / floor without touching its
  *  velocity — for positions that arrive from the network or a spawn. */
 export function ejectBall(b: { x: number; y: number; z: number }): void {
-  for (let pass = 0; pass < 4; pass++) {
+  for (let pass = 0; pass < 8; pass++) {
     let moved = false;
     if (b.y < BALL_RADIUS) b.y = BALL_RADIUS;
     b.x = clamp(b.x, BALL_BOUNDS.xMin, BALL_BOUNDS.xMax);
     b.z = clamp(b.z, BALL_BOUNDS.zMin, BALL_BOUNDS.zMax);
-    for (const s of SOLIDS) {
+    for (const s of solidBuckets[bucketOf(b.x, b.z)]) {
       if (!contact(b.x, b.y, b.z, s, scratch)) continue;
       b.x += scratch.nx * scratch.depth;
       b.y += scratch.ny * scratch.depth;
@@ -395,10 +486,27 @@ export function ejectBall(b: { x: number; y: number; z: number }): void {
     }
     if (!moved) return;
   }
+  if (!overlapsSolid(b.x, b.y, b.z)) return;
+  // wedged between props: take the nearest free spot on a widening spiral
+  const ox = b.x;
+  const oz = b.z;
+  for (let r = 0.15; r < 6; r += 0.15) {
+    for (let a = 0; a < 24; a++) {
+      const x = ox + Math.cos((a / 24) * Math.PI * 2) * r;
+      const z = oz + Math.sin((a / 24) * Math.PI * 2) * r;
+      if (!inBoundsXZ(x, z)) continue;
+      if (!overlapsSolid(x, BALL_RADIUS, z)) {
+        b.x = x;
+        b.y = BALL_RADIUS;
+        b.z = z;
+        return;
+      }
+    }
+  }
 }
 
 function overlapsSolid(x: number, y: number, z: number): boolean {
-  for (const s of SOLIDS) if (contact(x, y, z, s, scratch)) return true;
+  for (const s of solidBuckets[bucketOf(x, z)]) if (contact(x, y, z, s, scratch)) return true;
   return false;
 }
 
