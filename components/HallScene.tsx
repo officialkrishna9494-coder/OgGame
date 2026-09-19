@@ -1,17 +1,17 @@
 "use client";
 
 // ─── Cozy Hall · Three.js scene ─────────────────────────────────────────────
-// Cute rounded chibi avatars + soft physics + dollhouse hall, all procedural.
-// No external assets: every mesh / texture is generated so the room is fully
-// data-driven from RoomConfig (admin-editable).
+// Tailored procedural avatars (gentleman's suit / lady's dress, tinted by each
+// wearer's clothing color) + soft physics + dollhouse hall.
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { BallState, ContextState, DodgeState, GameState, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
-import { DODGE_LIVE_MS, DODGE_SHIELD_MS, IDLE_CONTEXT } from "../lib/hall-types";
+import type { BallState, ContextState, DodgeState, GameState, HairstyleId, OutfitId, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
+import { DODGE_LIVE_MS, DODGE_SHIELD_MS, IDLE_CONTEXT, resolveHairstyle } from "../lib/hall-types";
 import { ejectBall, handPoint, PICKUP_RADIUS, reachField, stepBall, TOUCH_FLOOR, TOUCH_SOLID, TOUCH_WALL } from "../lib/ball-physics";
 import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, inCourt } from "../lib/hall-layout";
 import { buildEnvironment, type CourtMode } from "./scene/environment";
+import { buildOutfit, disposeOutfit, OUTFIT_LABEL_Y, poseOutfit, setHairstyle, tintOutfit, type OutfitRig } from "./scene/outfits";
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
@@ -29,6 +29,8 @@ export interface DodgeThrow {
 interface Props {
   myName: string;
   myColor: string;
+  myOutfit: OutfitId;
+  myHairstyle: HairstyleId;
   mySocketId: string;
   players: Record<string, PlayerState>;
   ball: BallState;
@@ -249,8 +251,6 @@ function posterTexture(title: string, sub: string, hue: number): THREE.CanvasTex
   return t;
 }
 
-const HIT_RED = new THREE.Color("#ff5d5d");
-
 // ─── star collectible (mini-game) ───────────────────────────────────────────
 function createStar(): THREE.Group {
   const g = new THREE.Group();
@@ -284,126 +284,50 @@ function createStar(): THREE.Group {
 
 interface AvatarRig {
   group: THREE.Group;
-  body: THREE.Mesh;
-  head: THREE.Group;
-  armL: THREE.Mesh;
-  armR: THREE.Mesh;
-  footL: THREE.Mesh;
-  footR: THREE.Mesh;
+  outfit: OutfitRig;
+  outfitId: OutfitId;
+  colorHex: string;
+  name: string;
   label: THREE.Sprite;
   emote: THREE.Sprite | null;
   emoteUntil: number;
   chat: THREE.Sprite | null;
   chatText: string;
   ring: THREE.Mesh;
-  walkPhase: number;
-  // dodgeball: true while the red-flash stunt is showing (skips recolor)
-  wasHit: boolean;
 }
 
-function createAvatar(color: string, name: string): AvatarRig {  const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.02 });
-  const dark = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(color).multiplyScalar(0.82),
-    roughness: 0.6,
-  });
-  const cream = new THREE.MeshStandardMaterial({ color: "#fff6ea", roughness: 0.7 });
-
-  // body — chubby capsule
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.42, 8, 20), mat);
-  body.position.y = 0.62;
-  body.castShadow = true;
-  group.add(body);
-
-  // belly patch
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.22, 20, 16), cream);
-  belly.scale.set(1, 1.15, 0.55);
-  belly.position.set(0, 0.58, 0.24);
-  group.add(belly);
-
-  // head — big squishy sphere
-  const head = new THREE.Group();
-  head.position.y = 1.28;
-  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.36, 28, 22), mat);
-  skull.castShadow = true;
-  head.add(skull);
-  // ears
-  const earGeo = new THREE.SphereGeometry(0.11, 14, 12);
-  const earL = new THREE.Mesh(earGeo, mat);
-  earL.position.set(-0.32, 0.12, 0);
-  const earR = new THREE.Mesh(earGeo, mat);
-  earR.position.set(0.32, 0.12, 0);
-  head.add(earL, earR);
-  // eyes
-  const eyeGeo = new THREE.SphereGeometry(0.055, 12, 10);
-  const eyeMat = new THREE.MeshStandardMaterial({ color: "#2b2430", roughness: 0.25 });
-  const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
-  eyeL.position.set(-0.13, 0.02, 0.32);
-  const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
-  eyeR.position.set(0.13, 0.02, 0.32);
-  const hlGeo = new THREE.SphereGeometry(0.018, 8, 8);
-  const hlMat = new THREE.MeshBasicMaterial({ color: "#ffffff" });
-  const hlL = new THREE.Mesh(hlGeo, hlMat);
-  hlL.position.set(-0.11, 0.04, 0.37);
-  const hlR = new THREE.Mesh(hlGeo, hlMat);
-  hlR.position.set(0.15, 0.04, 0.37);
-  // blush
-  const blushMat = new THREE.MeshBasicMaterial({ color: "#ff8fab", transparent: true, opacity: 0.55 });
-  const blushGeo = new THREE.SphereGeometry(0.045, 10, 8);
-  const bL = new THREE.Mesh(blushGeo, blushMat);
-  bL.scale.set(1, 0.6, 0.4);
-  bL.position.set(-0.22, -0.08, 0.3);
-  const bR = new THREE.Mesh(blushGeo, blushMat);
-  bR.scale.set(1, 0.6, 0.4);
-  bR.position.set(0.22, -0.08, 0.3);
-  // smile
-  const smile = new THREE.Mesh(
-    new THREE.TorusGeometry(0.06, 0.012, 8, 16, Math.PI),
-    new THREE.MeshBasicMaterial({ color: "#5b4a5e" })
-  );
-  smile.position.set(0, -0.06, 0.33);
-  smile.rotation.z = Math.PI;
-  head.add(eyeL, eyeR, hlL, hlR, bL, bR, smile);
-  group.add(head);
-
-  // arms — tiny capsules that swing
-  const armGeo = new THREE.CapsuleGeometry(0.09, 0.28, 6, 12);
-  const armL = new THREE.Mesh(armGeo, dark);
-  armL.position.set(-0.42, 0.72, 0);
-  armL.castShadow = true;
-  const armR = new THREE.Mesh(armGeo, dark);
-  armR.position.set(0.42, 0.72, 0);
-  armR.castShadow = true;
-  group.add(armL, armR);
-
-  // feet — rounded nubs
-  const footGeo = new THREE.SphereGeometry(0.13, 14, 12);
-  const footL = new THREE.Mesh(footGeo, dark);
-  footL.scale.set(1, 0.7, 1.3);
-  footL.position.set(-0.16, 0.1, 0.06);
-  const footR = new THREE.Mesh(footGeo, dark);
-  footR.scale.set(1, 0.7, 1.3);
-  footR.position.set(0.16, 0.1, 0.06);
-  group.add(footL, footR);
-
-  // tuft
-  const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), cream);
-  tuft.position.set(0, 0.38, 0);
-  head.add(tuft);
+function createAvatar(color: string, name: string, outfitId: OutfitId, hairstyle: HairstyleId): AvatarRig {
+  const group = new THREE.Group();
+  const outfit = buildOutfit(outfitId, color, hairstyle);
+  group.add(outfit.group);
 
   const label = makeLabel(name);
-  label.position.y = 2.0;
+  label.position.y = OUTFIT_LABEL_Y;
   group.add(label);
 
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(0.62, 0.045, 10, 28),
-    new THREE.MeshBasicMaterial({ color: "#ffd166", transparent: true, opacity: 0 })
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0 })
   );
   ring.rotation.x = Math.PI / 2;
   ring.position.y = 0.06;
   group.add(ring);
 
-  return { group, body, head, armL, armR, footL, footR, label, emote: null, emoteUntil: 0, chat: null, chatText: "", ring, walkPhase: Math.random() * 6, wasHit: false };
+  return { group, outfit, outfitId, colorHex: color, name, label, emote: null, emoteUntil: 0, chat: null, chatText: "", ring };
+}
+
+// Swap the dressed body when the wearer changes outfit in the profile
+// editor. Label, bubbles and ring stay — only the cloth is rebuilt.
+function redress(rig: AvatarRig, outfitId: OutfitId, hairstyle: HairstyleId): void {
+  if (rig.outfitId === outfitId) {
+    setHairstyle(rig.outfit, hairstyle);
+    return;
+  }
+  rig.group.remove(rig.outfit.group);
+  disposeOutfit(rig.outfit);
+  rig.outfit = buildOutfit(outfitId, rig.colorHex, hairstyle);
+  rig.outfitId = outfitId;
+  rig.group.add(rig.outfit.group);
 }
 
 // shortest-path angle lerp (stops the sit-down 360° spin)
@@ -416,14 +340,14 @@ function lerpAngle(a: number, b: number, t: number): number {
 
 export const hallToss: { fn: null | (() => void) } = { fn: null };
 
-export default function HallScene({ myName, myColor, mySocketId, players, ball, room, tv, game, rps, sos, dodge, serverOffset, onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit }: Props) {
+export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySocketId, players, ball, room, tv, game, rps, sos, dodge, serverOffset, onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ players, ball, room, tv, game, rps, sos, dodge, serverOffset, myName, myColor, mySocketId });
+  const stateRef = useRef({ players, ball, room, tv, game, rps, sos, dodge, serverOffset, myName, myColor, myOutfit, myHairstyle, mySocketId });
   const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit });
 
   // keep the long-lived Three.js loop fed with fresh props without re-creating it
   useEffect(() => {
-    stateRef.current = { players, ball, room, tv, game, rps, sos, dodge, serverOffset, myName, myColor, mySocketId };
+    stateRef.current = { players, ball, room, tv, game, rps, sos, dodge, serverOffset, myName, myColor, myOutfit, myHairstyle, mySocketId };
     cbRef.current = { onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit };
   });
 
@@ -974,14 +898,32 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
     const starMeshes = new Map<string, { group: THREE.Group; phase: number }>();
     const getRig = (id: string, p: PlayerState) => {
       let r = rigs.get(id);
+      // older servers / cached snapshots may not send an outfit yet
+      const outfit: OutfitId = p.outfit === "dress" ? "dress" : "suit";
+      const hairstyle = resolveHairstyle(outfit, p.hairstyle);
       if (!r) {
-        r = createAvatar(p.color, p.name);
+        r = createAvatar(p.color, p.name, outfit, hairstyle);
         rigs.set(id, r);
         scene.add(r.group);
       }
-      // recolor / rename if changed (never mid bonk-flash — that restores itself)
-      if (!r.wasHit && (r.body.material as THREE.MeshStandardMaterial).color.getStyle() !== new THREE.Color(p.color).getStyle()) {
-        (r.body.material as THREE.MeshStandardMaterial).color.set(p.color);
+      // outfit swap (profile editor) rebuilds the cloth; recolor re-tints it.
+      // The ring always follows the clothing color so identical outfits of
+      // different wearers stay distinguishable; the action pulse below
+      // overrides it while fresh.
+      if (r.name !== p.name) {
+        r.group.remove(r.label);
+        r.label.material.map?.dispose();
+        r.label.material.dispose();
+        r.label = makeLabel(p.name);
+        r.label.position.y = OUTFIT_LABEL_Y;
+        r.group.add(r.label);
+        r.name = p.name;
+      }
+      redress(r, outfit, hairstyle);
+      if (r.colorHex !== p.color) {
+        r.colorHex = p.color;
+        tintOutfit(r.outfit, p.color);
+        (r.ring.material as THREE.MeshBasicMaterial).color.set(p.color);
       }
       return r;
     };
@@ -1010,7 +952,7 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         keys.delete(k);
         return;
       }
-      if (isTypingTarget(e)) return;
+      if (isTypingTarget(e) || (e.target as HTMLElement | null)?.closest('[role="dialog"]')) return;
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k) || ["w", "a", "s", "d"].includes(k)) {
         e.preventDefault();
       }
@@ -1380,6 +1322,8 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           id: MY_ID,
           name: st.myName,
           color: st.myColor,
+          outfit: st.myOutfit,
+          hairstyle: st.myHairstyle,
           x: me.x,
           z: me.z,
           facing: me.facing,
@@ -1503,27 +1447,32 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
         }
         const speed = id === MY_ID ? Math.hypot(me.vx, me.vz) : p.moving ? 3 : 0;
         const walking = id === MY_ID ? speed > 0.4 : p.moving;
-        rig.walkPhase += dt * (walking ? 11 : 2);
-        const bob = walking ? Math.abs(Math.sin(rig.walkPhase)) * 0.09 : Math.sin(elapsed * 2 + rig.walkPhase) * 0.025;
-        // floor-sitters settle down; sofa-sitters ride at seat height
-        const sitDrop = p.sitting && p.seat == null ? -0.28 : 0;
-        const seatY = p.sitting && p.seat != null ? (SOFA_SEATS[p.seat]?.y ?? 0.55) : 0;
-        const baseY = (id === MY_ID ? me.y : seatY) + sitDrop + bob;
+        const jumping = !p.sitting && (p.jumping || (id === MY_ID && me.y > 0.02));
+        // bonk freshness 1 → 0 — drives the cloth flash + wobble inside the
+        // pose engine (self reads the local stamp, friends the server echo)
+        const selfStamp = id === MY_ID ? selfHitAt : 0;
+        const hitStamp = selfStamp !== 0 ? selfStamp : (p.hitAt ?? 0);
+        const hitK = hitStamp !== 0 && Date.now() - hitStamp < 2000 ? 1 - (Date.now() - hitStamp) / 2000 : 0;
+        // perched sitters stand on the cushion edge (feet dangle); floor
+        // sitters sink into a deep kneel (see poseOutfit)
+        const baseY = p.sitting ? (p.seat != null ? (SOFA_SEATS[p.seat]?.y ?? 0.55) - 0.635 : -0.38) : id === MY_ID ? me.y : 0;
         g.position.y = baseY;
-        // lean + squash
-        const targetTilt = walking ? 0.12 : 0;
-        rig.body.rotation.x += (targetTilt - rig.body.rotation.x) * Math.min(1, dt * 8);
-        const squash = p.jumping || (id === MY_ID && me.y > 0.02) ? 1.08 : walking ? 1 + Math.sin(rig.walkPhase * 2) * 0.02 : 1;
-        rig.body.scale.set(1 / Math.sqrt(squash), squash, 1 / Math.sqrt(squash));
-        rig.head.position.y = 1.28 + (walking ? Math.abs(Math.sin(rig.walkPhase)) * 0.03 : Math.sin(elapsed * 2) * 0.015);
-        rig.head.rotation.z = walking ? Math.sin(rig.walkPhase) * 0.06 : Math.sin(elapsed * 1.4) * 0.03;
-        const swing = walking ? Math.sin(rig.walkPhase) * 0.7 : Math.sin(elapsed * 2) * 0.08;
-        rig.armL.rotation.x = swing;
-        rig.armR.rotation.x = -swing;
-        // sit pose
-        const sitK = p.sitting ? 1 : 0;
-        rig.footL.position.z += ((0.3 * sitK + 0.06) - rig.footL.position.z) * Math.min(1, dt * 8);
-        rig.footR.position.z += ((0.3 * sitK + 0.06) - rig.footR.position.z) * Math.min(1, dt * 8);
+        poseOutfit(rig.outfit, dt, {
+          speed,
+          moving: walking,
+          sitting: p.sitting,
+          floorSit: p.sitting && p.seat == null,
+          jumping,
+          action: p.action ?? null,
+          actionAt: p.actionAt,
+          elapsed,
+          hitK,
+        });
+        // head-bob on the stride (peaks mid-stance) — stillness when idle
+        const ob = rig.outfit;
+        if (!p.sitting && !jumping && ob.blend > 0.02) {
+          g.position.y += Math.abs(Math.cos(ob.phase)) * 0.045 * ob.blend;
+        }
 
         // chat bubble — overhead text for ~5s, even with chat closed.
         // The emoji rides above it when both show at once.
@@ -1570,24 +1519,9 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           rig.emote = null;
         }
 
-        // bonk'd! — red flash + dizzy hop for 2s (self reads local stamp,
-        // friends read the server echo; both restore cleanly after)
-        const selfStamp = id === MY_ID ? selfHitAt : 0;
-        const hitStamp = selfStamp !== 0 ? selfStamp : (p.hitAt ?? 0);
-        const hitFresh = hitStamp !== 0 && Date.now() - hitStamp < 2000;
-        const bodyMat = rig.body.material as THREE.MeshStandardMaterial;
-        if (hitFresh) {
-          const k = 1 - (Date.now() - hitStamp) / 2000; // 1 → 0
-          bodyMat.color.set(p.color).lerp(HIT_RED, 0.3 + 0.7 * k);
-          rig.wasHit = true;
-          g.position.y += Math.abs(Math.sin(elapsed * 13)) * 0.26 * k;
-          rig.head.rotation.z += Math.sin(elapsed * 18) * 0.28 * k;
-          rig.head.rotation.x = Math.sin(elapsed * 15) * 0.15 * k;
-        } else if (rig.wasHit) {
-          bodyMat.color.set(p.color);
-          rig.head.rotation.x = 0;
-          rig.wasHit = false;
-        }
+        // bonk'd! — dizzy hop for 2s. The cloth flash + wobble already ran in
+        // the pose engine; the hop here is group-level so it stacks cleanly.
+        if (hitK > 0) g.position.y += Math.abs(Math.sin(elapsed * 13)) * 0.26 * hitK;
 
         // action ring (poke = pink pulse, high-five = gold)
         const freshAction = p.action && p.actionAt && Date.now() - p.actionAt < 1200;
@@ -1600,12 +1534,19 @@ export default function HallScene({ myName, myColor, mySocketId, players, ball, 
           // happy hop for high-five
           if (p.action === "highfive") g.position.y = baseY + Math.sin(((Date.now() - (p.actionAt ?? 0)) / 1200) * Math.PI) * 0.45;
         } else {
-          mat.opacity += ((id === nearIdRef.current ? 0.22 : 0) - mat.opacity) * Math.min(1, dt * 6);
+          // No idle ground ring — avatars walk clean on real shadows only.
+          // The torus stays in the rig purely for the 1.2s poke / high-five
+          // pulse handled above; otherwise it fades out and stays hidden.
+          rig.ring.scale.set(1, 1, 1);
+          mat.opacity += (0 - mat.opacity) * Math.min(1, dt * 6);
+          if (mat.opacity < 0.02) mat.opacity = 0;
         }
       }
       for (const [id, rig] of rigs) {
         if (!seen.has(id)) {
           scene.remove(rig.group);
+          // cloth materials are per-avatar clones (geometry stays cached)
+          disposeOutfit(rig.outfit);
           rigs.delete(id);
         }
       }

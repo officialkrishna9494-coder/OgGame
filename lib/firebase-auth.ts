@@ -4,7 +4,9 @@
 
 import type { User } from "firebase/auth";
 import type { FirebaseApp } from "firebase/app";
-import { colorForName, type Identity } from "./auth";
+import { colorForName, loadStoredProfile, type Identity } from "./auth";
+
+import { resolveHairstyle } from "./hall-types";
 
 let app: FirebaseApp | null = null;
 
@@ -26,10 +28,13 @@ export async function getFirebaseApp(): Promise<FirebaseApp> {
 
 function identityFromUser(user: User): Identity {
   const name = (user.displayName ?? user.email?.split("@")[0] ?? "Friend").slice(0, 14);
+  const stored = loadStoredProfile();
   return {
     uid: user.uid,
-    name,
-    color: colorForName(user.uid + name),
+    name: stored.name || name,
+    color: stored.color || colorForName(user.uid + name),
+    outfit: stored.outfit ?? "suit",
+    hairstyle: resolveHairstyle(stored.outfit ?? "suit", stored.hairstyle),
     photoUrl: user.photoURL ?? undefined,
     signOut: () => void signOutUser(),
   };

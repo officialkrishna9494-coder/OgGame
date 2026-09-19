@@ -1,3 +1,4 @@
+import { resolveHairstyle, type HairstyleId } from "./hall-types";
 // ─── Cozy Hall · database layer (Firestore with local fallback) ─────────────
 // Firestore holds the persistent room: config, frames, posters, TV playlist,
 // user profiles. Socket.io keeps carrying the ephemeral stuff.
@@ -53,6 +54,8 @@ export async function saveUserProfile(profile: {
   uid: string;
   name: string;
   color: string;
+  outfit?: string;
+  hairstyle?: HairstyleId;
   photoUrl?: string;
 }): Promise<void> {
   const [{ doc, setDoc, serverTimestamp }, db] = await Promise.all([
@@ -64,6 +67,8 @@ export async function saveUserProfile(profile: {
     {
       displayName: profile.name,
       color: profile.color,
+      outfit: profile.outfit ?? "suit",
+      hairstyle: resolveHairstyle(profile.outfit === "dress" ? "dress" : "suit", profile.hairstyle),
       photoURL: profile.photoUrl ?? null,
       lastSeen: serverTimestamp(),
     },

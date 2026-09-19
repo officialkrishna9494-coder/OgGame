@@ -20,6 +20,7 @@ import TvPanel from "../components/TvPanel";
 import VoicePanel from "../components/VoicePanel";
 import { Icon } from "../components/icons";
 import { hallToss } from "../components/HallScene";
+import ProfilePanel, { type ProfileValue } from "../components/ProfilePanel";
 import { useRoom } from "../lib/room-store";
 import { useChat } from "../lib/useChat";
 import { useHallSocket } from "../lib/useHallSocket";
@@ -28,6 +29,7 @@ import { useVoice } from "../lib/useVoice";
 import { dbConfigured } from "../lib/db";
 import { popSfx, sosSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
+import { storeProfile } from "../lib/auth";
 import { IDLE_CONTEXT, type BallState, type ContextState, type PlayerState } from "../lib/hall-types";
 import { stampRoom } from "../lib/room-store";
 
@@ -35,6 +37,15 @@ const HallScene = dynamic(() => import("../components/HallScene"), { ssr: false 
 
 function HallClient({ me }: { me: Identity }) {
   const { room, updateRoom } = useRoom();
+  // editable profile (name / look / clothing color) — starts as the sign-in
+  // identity, then follows the profile editor. Persisted + synced live.
+  const [profile, setProfile] = useState<ProfileValue>(() => ({
+    name: me.name,
+    color: me.color,
+    outfit: me.outfit,
+    hairstyle: me.hairstyle,
+  }));
+  const [profileOpen, setProfileOpen] = useState(false);
   const [tvOpen, setTvOpen] = useState(false);
   // endsAt of the star-scramble round this player hid (0 = none hidden)
   const [gameHiddenRound, setGameHiddenRound] = useState(0);
@@ -50,20 +61,32 @@ function HallClient({ me }: { me: Identity }) {
   const mobile = useMobileLandscape();
   const voice = useVoice(me);
 
-  const socket = useHallSocket(me);
+  const socket = useHallSocket(profile);
   const { players, ball, tv, game, rps, sos, dodge, serverOffset, toasts, simulated, mySocketId } = socket.snapshot;
   // startsAt of the dodgeball round this player hid (0 = none hidden)
   const [dodgeHiddenRound, setDodgeHiddenRound] = useState(0);
   const chat = useChat();
-  const unreadCount = chat.messages.filter((m) => m.at > chatSeenAt && m.name !== me.name).length;
+  const unreadCount = chat.messages.filter((m) => m.at > chatSeenAt && m.name !== profile.name).length;
 
   // persist Google profiles to Firestore `users/{uid}` (no-op without config)
   useEffect(() => {
     if (!me.uid || !dbConfigured()) return;
     import("../lib/db").then((m) =>
-      m.saveUserProfile({ uid: me.uid!, name: me.name, color: me.color, photoUrl: me.photoUrl }).catch(() => {})
+      m.saveUserProfile({ uid: me.uid!, name: profile.name, color: profile.color, outfit: profile.outfit, hairstyle: profile.hairstyle, photoUrl: me.photoUrl }).catch(() => {})
     );
-  }, [me.uid, me.name, me.color, me.photoUrl]);
+  }, [me.uid, me.photoUrl, profile.name, profile.color, profile.outfit, profile.hairstyle]);
+
+  // profile editor save: instant everywhere (local + server relay, no rejoin)
+  const handleProfileSave = useCallback(
+    (next: ProfileValue) => {
+      setProfile(next);
+      storeProfile(next);
+      socket.updateProfile(next);
+      socket.pushToast("looking sharp — new look is live", "check");
+      setProfileOpen(false);
+    },
+    [socket]
+  );
 
   // game sounds: pop on every pickup, jingle on start / win
   const lastAt = useRef(0);
@@ -164,10 +187,10 @@ function HallClient({ me }: { me: Identity }) {
   // persist first (throws when offline/unsigned), bubble overhead on success
   const handleChatSend = useCallback(
     async (text: string) => {
-      await chat.send({ name: me.name, color: me.color, text });
+      await chat.send({ name: profile.name, color: profile.color, text });
       socket.sendChat(text);
     },
-    [chat, socket, me.name, me.color]
+    [chat, socket, profile.name, profile.color]
   );
   // ACT / E at the RPS table: idle → throw a challenge; someone else is
   // waiting → accept it (what the table and panel promise). Always open the
@@ -192,9 +215,9 @@ function HallClient({ me }: { me: Identity }) {
         return;
       }
       updateRoom(stampRoom({ ...room, tv: [...room.tv, { id: videoId, title }] }));
-      socket.pushToast(`${me.name} added “${title.slice(0, 30)}”`, "tv");
+      socket.pushToast(`${profile.name} added “${title.slice(0, 30)}”`, "tv");
     },
-    [room, updateRoom, socket, me.name]
+    [room, updateRoom, socket, profile.name]
   );
 
   const sitting = players["me"]?.sitting ?? false;
@@ -209,8 +232,10 @@ function HallClient({ me }: { me: Identity }) {
   return (
     <main className="relative h-dvh w-full touch-manipulation overflow-hidden bg-[#f6efe6] font-[var(--font-geist-sans),system-ui,sans-serif]">
       <HallScene
-        myName={me.name}
-        myColor={me.color}
+        myName={profile.name}
+        myColor={profile.color}
+        myOutfit={profile.outfit}
+        myHairstyle={profile.hairstyle}
         mySocketId={mySocketId}
         players={players}
         ball={ball}
@@ -258,6 +283,7 @@ function HallClient({ me }: { me: Identity }) {
         voiceOpen={voiceOpen}
         voiceCount={voice.peers.length || undefined}
         onSignOut={me.signOut}
+        onOpenProfile={() => setProfileOpen(true)}
         onEmote={socket.sendEmote}
         onPoke={() => socket.sendAction("poke", nearId)}
         onHighfive={() => socket.sendAction("highfive", nearId)}
@@ -328,6 +354,10 @@ function HallClient({ me }: { me: Identity }) {
           onControl={socket.tvControl}
           onClose={() => setTvOpen(false)}
         />
+      )}
+
+      {profileOpen && (
+        <ProfilePanel initial={profile} onSave={handleProfileSave} onClose={() => setProfileOpen(false)} />
       )}
 
       <RotatePrompt />

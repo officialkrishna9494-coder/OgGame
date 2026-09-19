@@ -13,6 +13,7 @@ import {
   DEV_QUICKPLAY,
   firebaseConfigured,
   makeQuickplayIdentity,
+  storeProfile,
   type Identity,
 } from "../lib/auth";
 
@@ -92,7 +93,16 @@ export default function AuthGate({ roomName, tagline, children }: Props) {
   }
 
   if (mode === "nickname") {
-    return <JoinOverlay roomName={roomName} tagline={tagline} onJoin={(name, color) => setIdentity({ name, color })} />;
+    return (
+      <JoinOverlay
+        roomName={roomName}
+        tagline={tagline}
+        onJoin={(name, color, outfit, hairstyle) => {
+          storeProfile({ name, color, outfit, hairstyle });
+          setIdentity({ name, color, outfit, hairstyle });
+        }}
+      />
+    );
   }
 
   if (mode === "missing") {

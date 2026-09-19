@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { BALL_SPAWN } from "./room-defaults";
-import { CHAT_MAX_LEN, IDLE_DODGE, IDLE_GAME, IDLE_RPS, type BallState, type DodgeState, type GameState, type PlayerState, type RpsChoice, type RpsState, type SosState, type TvState } from "./hall-types";
+import { CHAT_MAX_LEN, IDLE_DODGE, IDLE_GAME, IDLE_RPS, isOutfit, resolveHairstyle, type HairstyleId, type BallState, type DodgeState, type GameState, type OutfitId, type PlayerState, type RpsChoice, type RpsState, type SosState, type TvState } from "./hall-types";
 
 export interface HallSnapshot {
   connected: boolean;
@@ -53,12 +53,21 @@ function toToast(payload: unknown): { text: string; icon?: string } | null {
 interface JoinInfo {
   name: string;
   color: string;
+  outfit: OutfitId;
+  hairstyle: HairstyleId;
 }
 
-const BOT_NAMES: Array<{ name: string; color: string }> = [
-  { name: "Mochi", color: "#9bf6ff" },
-  { name: "Pudding", color: "#ffd6a5" },
-  { name: "Boba", color: "#bdb2ff" },
+export interface ProfilePatch {
+  name: string;
+  color: string;
+  outfit: OutfitId;
+  hairstyle: HairstyleId;
+}
+
+const BOT_NAMES: Array<{ name: string; color: string; outfit: OutfitId }> = [
+  { name: "Mochi", color: "#9bf6ff", outfit: "dress" },
+  { name: "Pudding", color: "#ffd6a5", outfit: "suit" },
+  { name: "Boba", color: "#bdb2ff", outfit: "dress" },
 ];
 
 function botPlayer(i: number, t: number): PlayerState {
@@ -68,6 +77,8 @@ function botPlayer(i: number, t: number): PlayerState {
     id: `bot-${i}`,
     name: base.name,
     color: base.color,
+    outfit: base.outfit,
+    hairstyle: resolveHairstyle(base.outfit, undefined),
     x: Math.sin(a) * 8,
     z: Math.cos(a * 0.8) * 5 + 1,
     facing: Math.atan2(Math.cos(a), -Math.sin(a * 0.8)),
@@ -94,6 +105,8 @@ export function useHallSocket(me: JoinInfo | null) {
   });
   const offsetRef = useRef<number | null>(null);
 
+  const identityRef = useRef(me);
+  useEffect(() => { identityRef.current = me; }, [me]);
   const socketRef = useRef<Socket | null>(null);
   const localRef = useRef<PlayerState | null>(null);
   const remoteRef = useRef<Record<string, PlayerState>>({});
@@ -150,7 +163,13 @@ export function useHallSocket(me: JoinInfo | null) {
       window.clearTimeout(timer);
       if (dead) return;
       setSnapshot((s) => ({ ...s, connected: true, simulated: false, mySocketId: socket.id ?? "" }));
-      socket.emit("hall:join", { name: me?.name ?? "Friend", color: me?.color ?? "#ffb3c7" });
+      const identity = identityRef.current;
+      socket.emit("hall:join", {
+        name: identity?.name ?? "Friend",
+        color: identity?.color ?? "#ffb3c7",
+        outfit: identity && isOutfit(identity.outfit) ? identity.outfit : "suit",
+        hairstyle: resolveHairstyle(identity?.outfit ?? "suit", identity?.hairstyle),
+      });
     });
     socket.on("connect_error", failToBots);
     socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState; game?: GameState; rps?: RpsState; sos?: SosState | null; dodge?: DodgeState; now?: number }) => {
@@ -197,8 +216,11 @@ export function useHallSocket(me: JoinInfo | null) {
       socket.close();
       socketRef.current = null;
     };
+    // Connect once per identity session. Profile edits (name / outfit /
+    // clothing color) travel over `hall:profile` via updateProfile — they must
+    // NOT reconnect, or the avatar would respawn across the hall every save.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.name, me?.color]);
+  }, [me !== null]);
 
   // ── emitters (also applied locally for instant feel) ─────────────────────
   const emit = useCallback(
@@ -231,6 +253,26 @@ export function useHallSocket(me: JoinInfo | null) {
       localRef.current = p;
       emit("hall:emote", { emote: emoji });
       setSnapshot((s) => ({ ...s, players: { ...s.players, [p.id]: p } }));
+    },
+    [emit]
+  );
+
+  // live profile edit (name / outfit / clothing color): instant locally,
+  // relayed to the server's meta so every screen re-tints without rejoining
+  const updateProfile = useCallback(
+    (patch: ProfilePatch) => {
+      const clean = {
+        name: patch.name.trim().slice(0, 14) || "Friend",
+        color: patch.color,
+        outfit: patch.outfit,
+        hairstyle: resolveHairstyle(patch.outfit, patch.hairstyle),
+      };
+      if (localRef.current) {
+        const next = { ...localRef.current, ...clean };
+        localRef.current = next;
+        setSnapshot((s) => ({ ...s, players: { ...s.players, [next.id]: next } }));
+      }
+      emit("hall:profile", clean);
     },
     [emit]
   );
@@ -387,6 +429,7 @@ export function useHallSocket(me: JoinInfo | null) {
     publishLocal,
     sendMove,
     sendEmote,
+    updateProfile,
     sendAction,
     tossBall,
     setBall,

@@ -9,12 +9,14 @@
 // Dev quickplay exists so you can test movement + interactions with zero
 // friction. Flip to `firebase` when deploying for real friends.
 
-import { AVATAR_COLORS } from "./hall-types";
+import { AVATAR_COLORS, isOutfit, resolveHairstyle, type HairstyleId, OUTFIT_DEFAULT_COLOR, type OutfitId } from "./hall-types";
 
 export interface Identity {
   uid?: string;
   name: string;
   color: string;
+  outfit: OutfitId;
+  hairstyle: HairstyleId;
   photoUrl?: string;
   signOut?: () => void;
 }
@@ -47,6 +49,43 @@ const QUICK_NAMES = [
 ];
 
 // One identity per tab load (module singleton). `?name=` overrides the nickname.
+// A saved profile (name / outfit / clothing color from the profile editor or
+// the join form) wins over the random quickplay look, so refreshes keep you.
+const PROFILE_KEY = "og-profile";
+
+export interface StoredProfile {
+  name?: string;
+  color?: string;
+  outfit?: OutfitId;
+  hairstyle?: HairstyleId;
+}
+
+export function loadStoredProfile(): StoredProfile {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(PROFILE_KEY);
+    if (!raw) return {};
+    const p = JSON.parse(raw) as StoredProfile;
+    const color = typeof p.color === "string" && /^#[0-9a-fA-F]{6}$/.test(p.color) ? p.color : undefined;
+    return {
+      name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 14) : undefined,
+      color,
+      outfit: isOutfit(p.outfit) ? p.outfit : undefined,
+      hairstyle: resolveHairstyle(p.outfit === "dress" ? "dress" : "suit", p.hairstyle),
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function storeProfile(p: StoredProfile): void {
+  try {
+    window.localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+  } catch {
+    /* private mode — look just won't persist */
+  }
+}
+
 export function makeQuickplayIdentity(): Identity {
   let name: string | null = null;
   if (typeof window !== "undefined") {
@@ -56,10 +95,14 @@ export function makeQuickplayIdentity(): Identity {
       name = null;
     }
   }
+  const stored = loadStoredProfile();
   const n = Math.floor(Math.random() * 1_000_000);
+  const outfit: OutfitId = stored.outfit ?? (n % 2 === 0 ? "suit" : "dress");
   return {
-    name: name?.trim() || `${QUICK_NAMES[n % QUICK_NAMES.length]}-${String(n % 1000).padStart(2, "0")}`,
-    color: AVATAR_COLORS[n % AVATAR_COLORS.length],
+    name: name?.trim() || stored.name || `${QUICK_NAMES[n % QUICK_NAMES.length]}-${String(n % 1000).padStart(2, "0")}`,
+    color: stored.color || OUTFIT_DEFAULT_COLOR[outfit],
+    outfit,
+    hairstyle: resolveHairstyle(outfit, stored.hairstyle),
   };
 }
 

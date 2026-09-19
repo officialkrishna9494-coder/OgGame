@@ -22,7 +22,9 @@ const handle = app.getRequestHandler();
 
 // Single-hall state (multi-room = prefix keys if you grow beyond one hall)
 const players = new Map(); // socketId -> PlayerState
-const meta = new Map(); // socketId -> { name, color }
+const meta = new Map(); // socketId -> { name, color, outfit, hairstyle }
+const { resolveHairstyle } = require("./lib/hall-types");
+const cleanOutfit = (v) => (v === "dress" ? "dress" : "suit");
 // floor plan + dodgeball referee are shared TypeScript (tsx loads them)
 const layout = require("./lib/hall-layout");
 const dodgeRef = require("./lib/dodge-referee");
@@ -85,7 +87,7 @@ function snapshot() {
 }
 
 function refPlayers() {
-  return [...players.values()].map((p) => ({ id: p.id, name: p.name, color: p.color, x: p.x, z: p.z }));
+  return [...players.values()].map((p) => ({ id: p.id, name: p.name, color: p.color, outfit: p.outfit, x: p.x, z: p.z }));
 }
 
 // ─── Emergency signal: one red button, global 10s cooldown, ~3.5s alarm ────
@@ -242,14 +244,16 @@ app.prepare().then(() => {
   }, 250);
 
   io.on("connection", (socket) => {
-    socket.on("hall:join", ({ name, color }) => {
+    socket.on("hall:join", ({ name, color, outfit, hairstyle }) => {
       socket.join("hall");
       const clean = String(name || "Friend").slice(0, 14);
-      meta.set(socket.id, { name: clean, color: String(color || "#ffb3c7") });
+      meta.set(socket.id, { name: clean, color: String(color || "#ffb3c7"), outfit: cleanOutfit(outfit), hairstyle: resolveHairstyle(cleanOutfit(outfit), hairstyle) });
       players.set(socket.id, {
         id: socket.id,
         name: clean,
         color: String(color || "#ffb3c7"),
+        outfit: cleanOutfit(outfit),
+        hairstyle: resolveHairstyle(cleanOutfit(outfit), hairstyle),
         x: (Math.random() - 0.5) * 2 * layout.SPAWN.xSpread,
         z: layout.SPAWN.zMin + Math.random() * (layout.SPAWN.zMax - layout.SPAWN.zMin),
         facing: Math.PI,
@@ -264,6 +268,21 @@ app.prepare().then(() => {
       socket.emit("hall:state", snapshot());
     });
 
+    // live profile edit: new name / outfit / clothing color, no rejoin needed.
+    // Position and game state are preserved — only identity changes.
+    socket.on("hall:profile", ({ name, color, outfit, hairstyle }) => {
+      const m = meta.get(socket.id);
+      if (!m) return;
+      const clean = String(name || m.name || "Friend").slice(0, 14) || "Friend";
+      m.name = clean;
+      m.color = String(color || m.color);
+      m.outfit = cleanOutfit(outfit);
+      m.hairstyle = resolveHairstyle(m.outfit, hairstyle ?? m.hairstyle);
+      const cur = players.get(socket.id);
+      if (cur) players.set(socket.id, { ...cur, name: clean, color: m.color, outfit: m.outfit, hairstyle: m.hairstyle });
+      dirty = true;
+    });
+
     socket.on("hall:move", (p) => {
       const m = meta.get(socket.id);
       if (!m) return;
@@ -271,6 +290,8 @@ app.prepare().then(() => {
         id: socket.id,
         name: m.name,
         color: m.color,
+        outfit: m.outfit,
+        hairstyle: m.hairstyle,
         x: Number(p.x) || 0,
         z: Number(p.z) || 0,
         facing: Number(p.facing) || 0,

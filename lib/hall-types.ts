@@ -13,6 +13,9 @@ export interface PlayerState {
   id: string;
   name: string;
   color: string;
+  /** outfit variant — "suit" (gentleman) or "dress" (lady); color tints it */
+  outfit: OutfitId;
+  hairstyle?: HairstyleId;
   x: number;
   z: number;
   facing: number; // radians, 0 = facing camera (+z)
@@ -117,6 +120,53 @@ export const AVATAR_COLORS = [  "#ffb3c7",
 ];
 
 export const EMOTES = ["❤️", "😂", "🎉", "👋", "😮", "🔥", "⭐", "💤"];
+
+// ─── Outfits · who wears what ───────────────────────────────────────────────
+// Avatars come in two tailored variants; `color` is the clothing theme the
+// wearer picked (suit cloth / dress fabric), so everyone stays distinguishable.
+export type OutfitId = "suit" | "dress";
+
+export type HairstyleId = "swept" | "textured" | "curtains" | "long" | "bob" | "ponytail";
+
+export const HAIRSTYLES: Record<OutfitId, ReadonlyArray<{ id: HairstyleId; label: string }>> = {
+  suit: [{ id: "swept", label: "Side sweep" }, { id: "textured", label: "Soft curls" }, { id: "curtains", label: "Curtains" }],
+  dress: [{ id: "long", label: "Long waves" }, { id: "bob", label: "Soft bob" }, { id: "ponytail", label: "Ponytail" }],
+};
+
+/** Old profiles and mismatched styles get the current character's default. */
+export function resolveHairstyle(outfit: OutfitId, value: unknown): HairstyleId {
+  return HAIRSTYLES[outfit].find(style => style.id === value)?.id ?? HAIRSTYLES[outfit][0].id;
+}
+
+export const OUTFITS: Array<{ id: OutfitId; label: string; hint: string }> = [
+  { id: "suit", label: "Male", hint: "The tailored suit" },
+  { id: "dress", label: "Female", hint: "The everyday dress" },
+];
+
+export function isOutfit(v: unknown): v is OutfitId {
+  return v === "suit" || v === "dress";
+}
+
+// clothing-theme palette — deep cloth tones for suits, bright tones for dresses
+export const OUTFIT_COLORS = [
+  "#2f3a56", // midnight navy
+  "#3d3347", // charcoal plum
+  "#6b2237", // burgundy
+  "#2d5a3d", // forest
+  "#7a5230", // cognac
+  "#23232b", // black
+  "#ff8fab", // signature pink
+  "#e6395f", // rose red
+  "#b388eb", // lavender
+  "#00b4d8", // lagoon
+  "#f4f1ea", // ivory
+  "#f4a259", // marigold
+];
+
+export const OUTFIT_DEFAULT_COLOR: Record<OutfitId, string> = {
+  suit: "#2f3a56",
+  dress: "#ff8fab",
+};
 
 // Proximity-driven contextual actions (mobile rail + game spots).
 export interface ContextState {

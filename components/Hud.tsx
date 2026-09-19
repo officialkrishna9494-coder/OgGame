@@ -44,6 +44,7 @@ interface Props {
   voiceOpen?: boolean;
   voiceCount?: number;
   onSignOut?: () => void;
+  onOpenProfile: () => void;
   onEmote: (e: string) => void;
   onPoke: () => void;
   onHighfive: () => void;
@@ -137,6 +138,14 @@ export default function Hud(p: Props) {
               <Icon name="signOut" size={14} />
             </button>
           )}
+          <button
+            onClick={p.onOpenProfile}
+            title="edit profile — name, look, clothing color"
+            aria-label="edit profile"
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.05] text-[#4a3f55] transition-colors hover:bg-black/10"
+          >
+            <Icon name="user" size={14} />
+          </button>
         </div>
 
         <div className="pointer-events-auto flex max-w-[46vw] flex-wrap items-center justify-end gap-1.5 rounded-2xl bg-white/70 px-2.5 py-2 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
@@ -379,6 +388,7 @@ function MobileHud(p: HudProps) {
       on: p.chatOpen,
       badge: p.unreadCount ? (p.unreadCount > 9 ? "9+" : String(p.unreadCount)) : undefined,
     },
+    { key: "profile", icon: "user", label: "profile", run: p.onOpenProfile },
   ];
   // one glanceable signal on the closed ⋯ button
   const menuAlert = !!p.unreadCount || p.rpsStatus === "picking" || p.rpsStatus === "revealing";
