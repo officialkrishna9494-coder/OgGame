@@ -233,9 +233,13 @@ ok("on foot: RIGHT = ACT (upper) + JUMP = SPACE (lower circle) · LEFT = stick",
 ok("top-right ⋯ menu owns every other action (right thumb stays clean)", () => {
   const hud = read("components/Hud.tsx");
   assert.match(hud, /aria-label=\{menuOpen \? "close menu" : "open menu"\}/);
-  for (const key of ['"react"', '"poke"', '"five"', '"tv"', '"sit"', '"rps"', '"voice"', '"chat"', '"profile"', '"view"']) {
+  for (const key of ['"react"', '"poke"', '"five"', '"tv"', '"sit"', '"voice"', '"chat"', '"profile"', '"view"']) {
     assert.ok(hud.includes(`key: ${key}`), `menu tile ${key} present`);
   }
+  // duels are ACT-at-the-table only: no menu tile, no dock button anywhere
+  assert.ok(!hud.includes('key: "rps"'), "no rps menu tile");
+  assert.ok(!hud.includes("p.onToggleRps"), "no rps bar button on either layout");
+  assert.ok(!hud.includes('title="rock-paper-scissors arena"'), "no rps dock entry");
   // opens downward from the top-right, never over the right thumb column
   assert.match(hud, /right-\[calc\(var\(--safe-r\)/, "menu anchored top-right");
 });

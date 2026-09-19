@@ -343,7 +343,6 @@ function HallClient({ me }: { me: Identity }) {
         onStartGame={handleStartGame}
         onStartDodge={handleStartDodge}
         onToggleVoice={() => setVoiceOpen((v) => !v)}
-        onToggleRps={() => setRpsOpen((v) => !v)}
         onRpsAct={handleRpsAct}
         onToggleChat={toggleChat}
         onToggleView={handleToggleView}

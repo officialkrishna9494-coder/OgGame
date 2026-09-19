@@ -65,7 +65,6 @@ interface Props {
   /** dodgeball starts from the court's pad (ACT / E) — no menu button either */
   onStartDodge: () => void;
   onToggleVoice: () => void;
-  onToggleRps: () => void;
   onRpsAct: () => void;
   onToggleChat: () => void;
   onToggleView: () => void;
@@ -238,9 +237,8 @@ export default function Hud(p: Props) {
           <button className={`${btn} ${p.sitting ? "!bg-[#3d3347] !text-white" : ""}`} onClick={p.onSit} title="sit right here">
             <Icon name="sit" size={17} /> {p.sitting ? "stand" : "sit"}
           </button>
-          <button className={btn} onClick={p.onToggleRps} title="rock-paper-scissors arena">
-            <IconWithDot name="rps" dot={p.rpsStatus === "picking" || p.rpsStatus === "revealing"} /> rps
-          </button>
+          {/* no rps button: duels start (and are accepted) only via the
+              contextual ACT / E at the table — the panel opens from there */}
           <button className={`${btn} ${p.voiceOpen ? "!bg-[#8ce8c0] !text-[#234034]" : ""}`} onClick={p.onToggleVoice} title="voice channel">
             <IconWithDot name="voice" dot={p.voiceStatus === "live"} />
             {p.voiceStatus === "live" ? `voice${p.voiceCount ? ` · ${p.voiceCount}` : ""}` : "voice"}
@@ -384,7 +382,7 @@ function MobileHud(p: HudProps) {
     { key: "five", icon: "highFive", label: "high-5", run: p.onHighfive, disabled: !p.nearName, keepOpen: true },
     { key: "tv", icon: "tv", label: p.tvOpen ? "hide tv" : "tv", run: p.onToggleTv, on: p.tvOpen },
     { key: "sit", icon: "sit", label: p.sitting ? "stand" : "sit", run: p.onSit, on: p.sitting },
-    { key: "rps", icon: "rps", label: "rps", run: p.onToggleRps, dot: p.rpsStatus === "picking" || p.rpsStatus === "revealing" },
+    // no rps tile: duels start (and are accepted) only via ACT at the table
     {
       key: "voice",
       icon: "voice",
@@ -405,8 +403,9 @@ function MobileHud(p: HudProps) {
     { key: "profile", icon: "user", label: "profile", run: p.onOpenProfile },
     { key: "view", icon: "view", label: "view", run: p.onToggleView },
   ];
-  // one glanceable signal on the closed ⋯ button
-  const menuAlert = !!p.unreadCount || p.rpsStatus === "picking" || p.rpsStatus === "revealing";
+  // one glanceable signal on the closed ⋯ button (chat only — duels live
+  // at the table and announce themselves via toast + the ACT button)
+  const menuAlert = !!p.unreadCount;
   // driving swaps the whole thumb layout for the CarPad hub below
   const driving = !!p.players["me"]?.cartId;
 
