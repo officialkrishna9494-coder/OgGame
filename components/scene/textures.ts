@@ -435,9 +435,10 @@ export function trackTexture(): THREE.CanvasTexture {
   };
   const step = Math.floor(loop.length / 8);
   for (let k = 0; k < 8; k++) arrowAt(k * step + 4);
-  // painted title in the infield, reads from the camera side
+  // painted title in the infield, reads from the camera side — kept clear of
+  // the shortcut bridge deck spanning just south of it
   g.save();
-  g.translate(X(-60), Y(-1));
+  g.translate(X(-56), Y(-3));
   g.fillStyle = "rgba(255,255,255,0.5)";
   g.font = "800 44px system-ui, sans-serif";
   g.textAlign = "center";

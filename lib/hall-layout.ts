@@ -219,11 +219,13 @@ export const PROPS: Prop[] = [
   ...PLANTS.map((p): Prop => ({ shape: "cyl", x: p.x, z: p.z, r: 0.62 * p.s, y1: 1.75 * p.s })),
   ...FLOOR_LAMPS.flatMap((l) => lampProps(l.x, l.z)),
 
-  // raceway annex (big room west, x −101…−23): tire stacks, cones and
-  // floodlight poles only — a clean professional paddock. Ramps live in
-  // RAMPS (heightfield), never here — see below. Every prop below is placed
-  // clear of the TRACK_POINTS centerline (see tests/raceway.test.mts).
-  ...[[-56, -1], [-66, 3], [-72, 1], [-48, 2]].map(
+  // raceway annex (big room west, x −101…−23): tire stacks, cones,
+  // floodlight poles and the bridge deck rails only — a clean professional
+  // paddock. Ramps + bridge deck live in RAMPS / BRIDGES (heightfield),
+  // never here — see below. Every prop below is placed clear of the
+  // TRACK_POINTS centerline AND of every wedge footprint (a stack poking
+  // through a slope reads as junk on the road — see tests/raceway.test.mts).
+  ...[[-56, -1], [-58, 5], [-58, -2], [-48, 2]].map(
     ([x, z]): Prop => ({ shape: "cyl", x, z, r: 0.55, y1: 0.95 })
   ),
   ...[[-36, 17.4], [-58, 17.5], [-78, 8], [-95, -10], [-52, -17], [-31, -13]].map(
@@ -231,6 +233,11 @@ export const PROPS: Prop[] = [
   ),
   ...[[-96, 12], [-96, -12], [-28, 15.5], [-28, -15.5]].map(
     ([x, z]): Prop => ({ shape: "cyl", x, z, r: 0.2, y1: 5.2 })
+  ),
+  // bridge deck rails (waist-high walls along both deck edges — they keep
+  // drivers and walkers on the top road, and read as open air underneath)
+  ...[0.4, 3.6].map(
+    (z): Prop => ({ shape: "box", x: -56, z, hx: 10, hz: 0.15, y0: 2.2, y1: 2.75 })
   ),
 ];
 
@@ -282,7 +289,48 @@ export const RAMPS: RampDef[] = [
   { x: -89.7, z: 9.8, dx: -0.6, dz: -0.8, length: 4.5, width: 3.2, height: 1.25 },
   // east return, launches south-southeast past the big door
   { x: -35.6, z: -5.6, dx: 0.707, dz: 0.707, length: 4.5, width: 3.2, height: 1.25 },
+  // bridge west approach: centre layby climbs east onto the deck
+  { x: -74, z: 2, dx: 1, dz: 0, length: 8, width: 3.2, height: 2.2 },
+  // bridge east approach: deck drops east back to the centre layby
+  { x: -38, z: 2, dx: -1, dz: 0, length: 8, width: 3.2, height: 2.2 },
 ];
+
+export interface BridgeDef {
+  /** deck centre; the span runs (dx, dz) for `length`, `width` across */
+  x: number;
+  z: number;
+  dx: number;
+  dz: number;
+  length: number;
+  width: number;
+  /** deck top surface — tall enough to drive under, reached via RAMPS above */
+  height: number;
+}
+
+/**
+ * Shortcut bridge over the little centre of the infield (horizontal, by the
+ * OG SPELL paint): karts climb an approach ramp, cross the deck, and drop
+ * back down — while everyone else drives straight underneath it ("through").
+ * The deck sits in the free pocket clear of every ribbon, so it never crowds
+ * another road. It is deliberately NOT a collider and NOT masonry: its top
+ * is rideable surface, its underside is open air (pillar aside, in PROPS).
+ */
+export const BRIDGES: BridgeDef[] = [
+  { x: -56, z: 2, dx: 1, dz: 0, length: 20, width: 3.5, height: 2.2 },
+];
+
+/** deck top surface under (x, z) — 0 outside every deck */
+export function bridgeTopAt(x: number, z: number): number {
+  let top = 0;
+  for (const b of BRIDGES) {
+    const rx = x - b.x;
+    const rz = z - b.z;
+    const s = rx * b.dx + rz * b.dz;
+    const lat = Math.abs(rx * -b.dz + rz * b.dx);
+    if (Math.abs(s) <= b.length / 2 && lat <= b.width / 2 && b.height > top) top = b.height;
+  }
+  return top;
+}
 
 /** professional two-lane ribbon */
 export const TRACK_WIDTH = 7;
@@ -395,7 +443,12 @@ export function resolveRamp(
     const s = rx * rmp.dx + rz * rmp.dz;
     const ls = rx * -rmp.dz + rz * rmp.dx;
     const half = rmp.width / 2 + r;
-    if (s > -r && s < rmp.length + r && Math.abs(ls) < half) {
+    // the shove zone ends AT the lip: past it you are airborne over open
+    // ground (or stepping onto a bridge deck), and a sideways shove there
+    // reads as falling off for no reason. The +0.01 is float slack for the
+    // lip point itself, not an extension. The low edge keeps its approach
+    // margin so fast entries never tunnel the face.
+    if (s > -r && s < rmp.length + 0.01 && Math.abs(ls) < half) {
       const h = rmp.height * Math.max(0, Math.min(1, s / rmp.length));
       if (y + 0.3 >= h) continue; // riding or landing — no wall here
       // below the surface: exit via the back or the nearer side (never the lip)

@@ -9,7 +9,7 @@ import * as THREE from "three";
 import type { BallState, CartState, ContextState, DodgeState, GameState, HairstyleId, OutfitId, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
 import { DODGE_LIVE_MS, DODGE_SHIELD_MS, IDLE_CONTEXT, resolveHairstyle } from "../lib/hall-types";
 import { ejectBall, handPoint, PICKUP_RADIUS, reachField, stepBall, TOUCH_FLOOR, TOUCH_SOLID, TOUCH_WALL } from "../lib/ball-physics";
-import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, RACE, clampToRooms, inCourt, rampGroundAt, resolveRamp, TRACK_GATES } from "../lib/hall-layout";
+import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, RACE, bridgeTopAt, clampToRooms, inCourt, rampGroundAt, resolveRamp, TRACK_GATES } from "../lib/hall-layout";
 import { buildEnvironment, type CourtMode } from "./scene/environment";
 import { buildOutfit, disposeOutfit, OUTFIT_LABEL_Y, poseOutfit, setHairstyle, tintOutfit, type OutfitRig } from "./scene/outfits";
 import { buildCart, cartSeatOffset, disposeCart, poseCart, CART_RIDER_Y, type CartRig } from "./scene/carts";
@@ -1239,8 +1239,12 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         // anything solid — bump, never clip through. Speed is scrubed ONCE
         // per frame below (the old per-collider ×0.55 was a dead stick:
         // three overlapping colliders multiplied to ×0.17 every frame).
+        // Height-aware: wheels skip what they already fly over (cones under
+        // jump air) and pass under what clears the kart (bridge rails),
+        // so elevated spans never ghost-block either level.
         let bumped = false;
         for (const c of COLLIDERS) {
+          if (c.y1 < sim.y - 0.3 || (c.y0 ?? 0) > sim.y + 1.2) continue;
           const cx = Math.max(c.x - c.hx, Math.min(nx, c.x + c.hx));
           const cz = Math.max(c.z - c.hz, Math.min(nz, c.z + c.hz));
           const dx = nx - cx;
@@ -1301,8 +1305,15 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         if (bumped) sim.speed *= Math.exp(-6 * dt);
         sim.x = nx;
         sim.z = nz;
-        // vertical — ramps carry, lips launch, gravity rules the air
-        const ground = rampGroundAt(sim.x, sim.z);
+        // vertical — ramps carry, lips launch, gravity rules the air.
+        // The bridge deck joins in only when reachable from current height
+        // (stepping off a ramp lip, riding it, landing on it): a kart on the
+        // infield floor driving UNDER the deck must keep floor ground, never
+        // teleport up onto it.
+        const wedgeGround = rampGroundAt(sim.x, sim.z);
+        const deckTop = bridgeTopAt(sim.x, sim.z);
+        const deckGround = deckTop > 0 && sim.y + 0.5 >= deckTop ? deckTop : 0;
+        const ground = Math.max(wedgeGround, deckGround);
         if (sim.y <= ground + 0.02 && sim.vy <= 0) {
           sim.y = ground;
           sim.vy = 0;
@@ -1428,9 +1439,11 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       if (!sitting && !myCartId) {
         // low furniture never blocks once the feet are above its top: a
         // running jump carries over coffee tables, stools, cushions and the
-        // bleachers instead of sticking to them mid-air
+        // bleachers instead of sticking to them mid-air. Elevated spans
+        // (bridge rails) never block from below — walkers pass under them.
         for (const c of COLLIDERS) {
           const top = c.y1 ?? 0;
+          if ((c.y0 ?? 0) > me.y + 1.7) continue;
           if (top <= VAULT_MAX && me.y >= top - STEP_KNEE) continue;
           const r = resolveCircleAABB(me.x, me.z, 0.38, c);
           me.x = r.x;
@@ -1439,8 +1452,13 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         // ground support — the highest top underfoot close enough to stand
         // on, so jumps land ON low furniture instead of falling through it
         // (and tiny curbs like the hearth step up with no hop at all).
-        // Raceway ramps join in via the heightfield (never as blockers).
-        let ground = rampGroundAt(me.x, me.z);
+        // Raceway ramps join in via the heightfield (never as blockers), and
+        // the bridge deck joins too when reachable — walkers climb an
+        // approach, stroll the top road, and stroll back down, but never
+        // teleport up from the infield floor underneath it.
+        const deckTopFeet = bridgeTopAt(me.x, me.z);
+        const deckGroundFeet = deckTopFeet > 0 && me.y + 0.5 >= deckTopFeet ? deckTopFeet : 0;
+        let ground = Math.max(rampGroundAt(me.x, me.z), deckGroundFeet);
         for (const c of COLLIDERS) {
           const top = c.y1 ?? 0;
           if (top <= 0.001 || top > VAULT_MAX || top > me.y + STEP_KNEE) continue;
@@ -2021,13 +2039,16 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         poseCart(rig, dt, { speed: sim.speed, steer: sim.steer, elapsed, boost: sim.boost });
       }
       // ── raceway laps (my driven cart only): gates in travel order, clock
-      // starts on the first line crossing, wrong-way resets with a cooldown ──
+      // starts on the first line crossing, wrong-way resets with a cooldown.
+      // Airborne karts (bridge deck, big jump air) never count gates — laps
+      // are won on the ribbon, and a deck crossing over a gate must neither
+      // advance the lap nor cry wrong-way.
       if (myCartId) {
         const nowMs = Date.now();
         let insideAny = false;
         for (let i = 0; i < TRACK_GATES.length; i++) {
           const gt = TRACK_GATES[i];
-          if (Math.hypot(me.x - gt.x, me.z - gt.z) > 4) continue;
+          if (Math.hypot(me.x - gt.x, me.z - gt.z) > 4 || me.y > 1.5) continue;
           insideAny = true;
           // edge trigger: lingering inside one gate must not re-fire it
           if (i === cartLap.armed) continue;

@@ -9,6 +9,7 @@ import { drawIcon, drawIconText } from "../../lib/canvas-icons";
 import {
   BACK_WALL_Z,
   BOOKSHELF,
+  BRIDGES,
   CAFE,
   COURT,
   DOOR_GAP,
@@ -366,12 +367,32 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
       freeze(ramp);
     }
 
+    // ── shortcut bridge over the infield (horizontal, by the OG SPELL paint)
+    // Slab + edge lines + waist-high side rails; the approach wedges above
+    // land on its open ends. Karts cross it, or drive straight under it —
+    // the deck is rideable surface, never a wall (see bridgeTopAt). Rails
+    // match the PROPS colliders exactly, so the top road is rigid to drive
+    // and to walk, while the underside stays open air.
+    for (const b of BRIDGES) {
+      const deck = new THREE.Group();
+      const asphalt = mat("#4a4d5e", 0.8);
+      deck.add(mesh(new THREE.BoxGeometry(b.length, 0.35, b.width), asphalt, 0, b.height - 0.175, 0, true));
+      for (const s of [-1, 1]) {
+        deck.add(mesh(new THREE.BoxGeometry(b.length, 0.06, 0.18), mat("#f4f1ea", 0.7), 0, b.height + 0.005, s * (b.width / 2 - 0.2)));
+        deck.add(mesh(new THREE.BoxGeometry(b.length, 0.55, 0.3), mat("#f4f1ea", 0.6), 0, b.height + 0.275, s * (b.width / 2 - 0.15), true));
+      }
+      deck.position.set(b.x, 0, b.z);
+      deck.rotation.y = Math.atan2(b.dx, b.dz) - Math.PI / 2;
+      root.add(deck);
+      freeze(deck);
+    }
+
     // ── racing props only: tire stacks, cones, floodlights ──
     // (No stands, no arch gates — the circuit stays clean.)
     {
       const gear = new THREE.Group();
       const tireMat = mat("#26232b", 0.9);
-      for (const [tx, tz] of [[-56, -1], [-66, 3], [-72, 1], [-48, 2]] as const) {
+      for (const [tx, tz] of [[-56, -1], [-58, 5], [-58, -2], [-48, 2]] as const) {
         gear.add(mesh(cylinder(0.5, 0.5, 0.28, 18), tireMat, tx, 0.14, tz, true));
         gear.add(mesh(cylinder(0.5, 0.5, 0.28, 18), tireMat, tx, 0.42, tz, true));
         gear.add(mesh(cylinder(0.45, 0.45, 0.28, 18), mat("#f4f1ea", 0.6), tx, 0.7, tz, true));

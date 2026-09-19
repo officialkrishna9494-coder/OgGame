@@ -19,7 +19,7 @@ const root = path.resolve(here, "..");
 const read = (p: string) => fs.readFileSync(path.join(root, p), "utf8");
 
 const layout = await import("../lib/hall-layout");
-const { HALL, RACE, DOOR_GAP, RAMPS, TRACK, TRACK_POINTS, TRACK_PLANE, TRACK_WIDTH, TRACK_GATES, sampleTrackCenterline, clampToRooms, rampGroundAt, resolveRamp, PROPS } = layout;
+const { HALL, RACE, DOOR_GAP, RAMPS, BRIDGES, TRACK, TRACK_POINTS, TRACK_PLANE, TRACK_WIDTH, TRACK_GATES, sampleTrackCenterline, bridgeTopAt, clampToRooms, rampGroundAt, resolveRamp, PROPS } = layout;
 const { BALL_BOUNDS } = await import("../lib/room-defaults");
 
 let passed = 0;
@@ -88,11 +88,24 @@ const distToLoop = (x: number, z: number) => {
   return best;
 };
 
-// ── 4 · ramps for jumps, on the racing line ──────────────────────────────────
-ok("ramps: jump ramps squarely on the straights, facing travel", () => {
-  assert.ok(RAMPS.length >= 3, "a ramp for every straight");
+// ── 4 · jump ramps on the racing line, bridge approaches on the deck ─────────
+ok("ramps: jump ramps ride the line, approaches land on the deck ends", () => {
+  assert.ok(BRIDGES.length >= 1, "shortcut deck exists");
+  const deck = BRIDGES[0];
+  const ends = [-1, 1].map((s) => ({ x: deck.x + deck.dx * (deck.length / 2) * s, z: deck.z + deck.dz * (deck.length / 2) * s }));
+  let jumps = 0;
+  let approaches = 0;
   for (const r of RAMPS) {
-    assert.ok(r.width <= TRACK_WIDTH, "ramp fits inside the ribbon");
+    const topX = r.x + r.dx * r.length;
+    const topZ = r.z + r.dz * r.length;
+    const landsOnDeck = ends.some((e) => Math.hypot(topX - e.x, topZ - e.z) < 1.5);
+    if (landsOnDeck) {
+      approaches++;
+      assert.ok(Math.abs(r.height - deck.height) < 0.01, "approach meets the deck flush");
+      assert.ok(r.width <= deck.width + 0.01, "approach fits the deck");
+      continue;
+    }
+    jumps++;
     assert.ok(r.height >= 1 && r.height <= 1.6, "launch height stays kart-safe");
     // midpoint of the slope must sit on the track
     const mx = r.x + r.dx * (r.length / 2);
@@ -114,6 +127,8 @@ ok("ramps: jump ramps squarely on the straights, facing travel", () => {
     const dot = ((b.x - a.x) / len) * r.dx + ((b.z - a.z) / len) * r.dz;
     assert.ok(dot > 0.7, `ramp faces travel (dot ${dot.toFixed(2)})`);
   }
+  assert.ok(jumps >= 3, "jump ramps for the straights");
+  assert.equal(approaches, 2, "one approach per deck end");
   // heightfield carries wheels over the mid-slope
   const r0 = RAMPS[0];
   const mid = rampGroundAt(r0.x + r0.dx * (r0.length / 2), r0.z + r0.dz * (r0.length / 2));
@@ -154,13 +169,28 @@ ok("gates: lap gates ring the loop in travel order", () => {
 
 // ── 6 · clean racing props, clear of the ribbon ──────────────────────────────
 ok("props: tires, cones and floodlights only — clear of the ribbon", () => {
-  const raceProps = PROPS.filter((p) => p.x < HALL.xMin);
+  // elevated spans (deck rails) hug the bridge, not the ribbon — §10 checks them
+  const raceProps = PROPS.filter((p) => p.x < HALL.xMin && !(p.y0 != null && p.y0 > 0));
   assert.ok(raceProps.length >= 10, "a dressed circuit");
   for (const p of raceProps) {
     const r = p.shape === "box" ? Math.max(p.hx, p.hz) : p.r;
     const need = TRACK_WIDTH / 2 + r + 0.75;
     const d = distToLoop(p.x, p.z);
     assert.ok(d >= need, `prop at (${p.x},${p.z}) ${d.toFixed(1)} m off the line (needs ${need.toFixed(1)})`);
+  }
+  // no ground prop inside any wedge footprint either — a stack poking
+  // through a slope reads as junk sitting on the road
+  for (const r of RAMPS) {
+    for (const p of PROPS) {
+      if (p.y0 != null && p.y0 > 0) continue;
+      if (p.x > HALL.xMin) continue; // race wedges live west of the hall
+      const pr = p.shape === "box" ? Math.max(p.hx, p.hz) : p.r;
+      const s = (p.x - r.x) * r.dx + (p.z - r.z) * r.dz;
+      const lat = Math.abs((p.x - r.x) * -r.dz + (p.z - r.z) * r.dx);
+      if (s > -0.5 && s < r.length + 0.5 && lat < r.width / 2 + pr + 0.4) {
+        assert.fail(`prop at (${p.x},${p.z}) sits in the ${r.height >= 2 ? "bridge approach" : "jump ramp"} footprint`);
+      }
+    }
   }
   const env = read("components/scene/environment.ts");
   // scope to the raceway annex block (the dodgeball court has its own flags)
@@ -204,6 +234,67 @@ ok("air: rider rides kart height, take-off scales with driving speed", () => {
   // crawling dribbles off, turbo launches; reversing never launches
   assert.match(scene, /Math\.max\(0, sim\.speed\) \* grade/, "take-off scales with speed");
   assert.match(scene, /grade > 0\.02/, "no micro-pops off flat lips");
+});
+
+// ── 10 · shortcut bridge over the centre (over AND through) ──────────────────
+ok("bridge: horizontal deck by the OG SPELL paint, joining road included", () => {
+  assert.equal(BRIDGES.length, 1);
+  const deck = BRIDGES[0];
+  // horizontal span across the infield centre, near the OG SPELL paint
+  assert.ok(Math.abs(deck.dx) > 0.9 && Math.abs(deck.dz) < 0.1, "deck runs horizontally");
+  assert.ok(deck.x > RACE.xMin + 10 && deck.x < RACE.xMax - 10, "deck centred in the room");
+  assert.ok(Math.hypot(deck.x - -60, deck.z - -1) < 8, "deck sits by the OG SPELL paint");
+  assert.ok(deck.width >= 3, "a kart fits the deck");
+  // the whole deck sits in the little centre, clear of every other road
+  for (let k = 0; k <= 8; k++) {
+    const px = deck.x + deck.dx * (deck.length / 2) * ((k / 4) - 1);
+    const pz = deck.z + deck.dz * (deck.length / 2) * ((k / 4) - 1);
+    let best = Infinity;
+    for (const p of loop) {
+      const d = Math.hypot(px - p.x, pz - p.z);
+      if (d < best) best = d;
+    }
+    assert.ok(best >= TRACK_WIDTH / 2 + 1, `deck centre clear of the ribbon (${best.toFixed(1)} m)`);
+  }
+  // tall enough to drive UNDER (through) as well as over
+  assert.ok(deck.height >= 2, "clearance to drive underneath");
+  assert.equal(bridgeTopAt(deck.x, deck.z), deck.height, "deck top is rideable surface");
+  assert.equal(bridgeTopAt(deck.x, deck.z + deck.width / 2 + 2), 0, "no surface off the deck");
+  // no pole on the driving line — open deck centre end to end (ground
+  // clutter tucked fully underneath doesn't count: the driving band is
+  // deck.height ± kart clearance)
+  for (const p of PROPS) {
+    const s = (p.x - deck.x) * deck.dx + (p.z - deck.z) * deck.dz;
+    const lat = Math.abs((p.x - deck.x) * -deck.dz + (p.z - deck.z) * deck.dx);
+    if (Math.abs(s) <= deck.length / 2 && lat < deck.width / 2 - 0.8) {
+      const y0 = p.y0 ?? 0;
+      if (y0 < deck.height + 1.0 && p.y1 > deck.height - 1.2) {
+        assert.fail(`prop at (${p.x},${p.z}) stands on the driving line`);
+      }
+    }
+  }
+  // waist-high rails hug both deck edges at deck height — the rigid top road
+  const rails = PROPS.filter(
+    (p) => p.shape === "box" && p.y0 != null && p.y0 > 0 && Math.abs((p.x - deck.x) * deck.dx + (p.z - deck.z) * deck.dz) <= deck.length / 2
+  );
+  assert.equal(rails.length, 2, "one rail per deck edge");
+  for (const r of rails) {
+    assert.ok(r.shape === "box" && Math.abs(r.y0 - deck.height) < 0.01, "rails start at the deck");
+    assert.ok(r.shape === "box" && r.y1 - deck.height >= 0.4, "rails stand waist-high");
+  }
+  // the sim merges the deck only when reachable — floor drivers underneath
+  // keep floor ground (no teleport), walkers stroll the top road too, and
+  // gates ignore airborne karts
+  const scene = read("components/HallScene.tsx");
+  assert.match(scene, /bridgeTopAt/, "kart ground reads the deck");
+  assert.match(scene, /deckGround/, "deck merges only when reachable");
+  assert.match(scene, /deckGroundFeet/, "walkers stroll the top road too");
+  assert.match(scene, /c\.y1 < sim\.y - 0\.3/, "karts fly over low props, stop at rails");
+  assert.match(scene, /\(c\.y0 \?\? 0\) > sim\.y \+ 1\.2/, "karts pass under elevated spans");
+  assert.match(scene, /\(c\.y0 \?\? 0\) > me\.y \+ 1\.7/, "walkers pass under elevated spans");
+  assert.match(scene, /me\.y > 1\.5/, "lap gates ignore airborne karts");
+  const env = read("components/scene/environment.ts");
+  assert.match(env, /for \(const b of BRIDGES\)/, "deck mesh built from data");
 });
 
 console.log(`\nPASS ${passed} checks — big door + bigger twisty circuit hold.`);

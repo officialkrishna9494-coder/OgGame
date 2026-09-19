@@ -89,14 +89,15 @@ export const SOFA_SEATS: SofaSeat[] = [-2.2, -1.1, 0, 1.1, 2.2].map((dx) => ({
   facing: Math.PI,
 }));
 
-// Static player colliders in hall space (x, z half-extents + top height y1),
+// Static colliders in hall space (footprint + vertical span y0 → y1),
 // generated from the layout props. Round props become their bounding square.
-// `y1` lets the player physics vault low furniture: anything at or below the
-// feet (+ a knee allowance) never blocks, and jumps can land on top of it.
+// `y1` lets walkers vault low furniture and karts fly over it; `y0` lets
+// both pass UNDER elevated spans (bridge deck rails) — physics skips a
+// collider entirely below the wheels or above the head (see HallScene).
 export const COLLIDERS = PROPS.filter((p) => !p.ballOnly).map((p) =>
   p.shape === "box"
-    ? { x: p.x, z: p.z, hx: p.hx, hz: p.hz, y1: p.y1 }
-    : { x: p.x, z: p.z, hx: p.r, hz: p.r, y1: p.y1 }
+    ? { x: p.x, z: p.z, hx: p.hx, hz: p.hz, y0: p.y0 ?? 0, y1: p.y1 }
+    : { x: p.x, z: p.z, hx: p.r, hz: p.r, y0: p.y0 ?? 0, y1: p.y1 }
 );
 
 export const HALL_BOUNDS = { x: HALL.xMax - 0.4, zMin: HALL.zMin + 0.6, zMax: HALL.zMax - 0.8 };
