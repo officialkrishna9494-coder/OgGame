@@ -16,7 +16,7 @@ import { buildCart, cartSeatOffset, disposeCart, poseCart, CART_RIDER_Y, type Ca
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
-import { toggleFpView, viewState } from "../lib/view-state";
+import { cycleViewMode, isFirstPerson, viewState } from "../lib/view-state";
 import { resetTurbo, turboState } from "../lib/turbo-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 
@@ -1014,11 +1014,11 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         return;
       }
       if (isTypingTarget(e) || (e.target as HTMLElement | null)?.closest('[role="dialog"]')) return;
-      // V — GTA-style view toggle: dollhouse follow ↔ first-person head-cam.
-      // Modifiers excluded so browser shortcuts and pasting never flip it.
+      // V — cycle the triple view: dollhouse follow → first-person → close
+      // chase → follow … Modifiers excluded so shortcuts never flip it.
       if (k === "v" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
-        toggleFpView();
+        cycleViewMode();
         return;
       }
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k) || ["w", "a", "s", "d"].includes(k)) {
@@ -1163,7 +1163,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       const sitting = st.players[MY_ID]?.sitting ?? me.sitting;
       const sofaMode = sitting && st.players[MY_ID]?.seatMode === "sofa";
       let mySeat = st.players[MY_ID]?.seat ?? null;
-      const fpView = viewState.firstPerson;
+      // turn-and-throttle walking suits every camera that looks along the
+      // nose (first-person AND close chase); the dollhouse strafes instead
+      const steerView = viewState.mode !== 0;
 
       // ── turbo: SPACE while driving (the on-screen gauge doubles as the
       // boost button on touch, where there is no spacebar). The tank drains
@@ -1318,7 +1320,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           me.facing = lerpAngle(me.facing, seat.facing, k);
         }
         // floor-sit: stay exactly where you stand (no glide, no sink)
-      } else if (fpView) {
+      } else if (steerView) {
         // first person on foot — A/D (or ←/→, or the stick sideways) turn the
         // head, W/S (or ↑/↓, or the stick up/down) throttle along the nose.
         // World-aligned strafing would fight the camera, so it stays home.
@@ -1800,8 +1802,8 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           g.rotation.y += d * Math.min(1, dt * 10);
         }
         // first person hides your own head and body (the camera rides inside
-        // it) — everyone else renders exactly as before
-        g.visible = id !== MY_ID || !viewState.firstPerson;
+        // it) — chase and follow show you, everyone else always shows
+        g.visible = id !== MY_ID || !isFirstPerson();
         const cartSpeed = driverSim ? Math.abs(driverSim.speed) : 0;
         const speed = driving ? cartSpeed : id === MY_ID ? Math.hypot(me.vx, me.vz) : p.moving ? 3 : 0;
         const walking = driving ? cartSpeed > 0.4 : id === MY_ID ? speed > 0.4 : p.moving;
@@ -2108,19 +2110,20 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
 
       // ── camera follow: both the position AND the gaze point are damped,
       // so the frame glides instead of shaking ──
-      const fpCam = viewState.firstPerson;
-      const drivingCam = fpCam && myCartId !== null;
+      const fpCam = isFirstPerson();
+      const chaseCam = !fpCam && viewState.mode === 2;
+      const drivingCam = (fpCam || chaseCam) && myCartId !== null;
+      // head anchor (avatar group position, so the seat + walk-bob ride along)
+      const myG = rigs.get(MY_ID)?.group.position;
+      const px = myG ? myG.x : me.x;
+      const py = myG ? myG.y : me.y;
+      const pz = myG ? myG.z : me.z;
+      const fx = Math.sin(me.facing);
+      const fz = Math.cos(me.facing);
       if (fpCam) {
-        // first person — ride the head (the avatar's own group position, so
-        // the kart seat and the walk-bob come along) and gaze down the nose.
-        // In the kart the gaze tips down so the hood and nose fill the lower
-        // frame like a real cockpit; on foot it stays near level.
-        const myG = rigs.get(MY_ID)?.group.position;
-        const px = myG ? myG.x : me.x;
-        const py = myG ? myG.y : me.y;
-        const pz = myG ? myG.z : me.z;
-        const fx = Math.sin(me.facing);
-        const fz = Math.cos(me.facing);
+        // first person — ride the head and gaze down the nose. In the kart
+        // the gaze tips down so the hood and nose fill the lower frame like
+        // a real cockpit; on foot it stays near level.
         desired.set(px + fx * 0.22, py + 1.55, pz + fz * 0.22);
         camera.position.lerp(desired, Math.min(1, dt * 10));
         const k = Math.min(1, dt * 10);
@@ -2129,6 +2132,15 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         lookSm.x += (px + fx * ahead - lookSm.x) * k;
         lookSm.y += (py + 1.55 - drop - lookSm.y) * k;
         lookSm.z += (pz + fz * ahead - lookSm.z) * k;
+      } else if (chaseCam) {
+        // close chase — hover just behind the back, nearer than max zoom-in
+        // ever reaches, full body in frame with the road ahead up top
+        desired.set(px - fx * 4.0, py + 2.7, pz - fz * 4.0);
+        camera.position.lerp(desired, Math.min(1, dt * 6));
+        const k = Math.min(1, dt * 6);
+        lookSm.x += (px + fx * 6 - lookSm.x) * k;
+        lookSm.y += (py + 0.9 - lookSm.y) * k;
+        lookSm.z += (pz + fz * 6 - lookSm.z) * k;
       } else {
         const tx = me.x * 0.72;
         const tz = me.z * 0.7 + 2.4;
@@ -2140,9 +2152,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       }
       camera.lookAt(lookSm);
       // lens to match the view: wider + a close near-plane in first person
-      // (the dash and the held ball live under a metre away), classic 44
-      // and deep precision back outside
-      const wantFov = !fpCam ? 44 : drivingCam ? 62 : 55;
+      // (the dash and the held ball live under a metre away), a touch wider
+      // in close chase, classic 44 and deep precision back outside
+      const wantFov = chaseCam ? 50 : !fpCam ? 44 : drivingCam ? 62 : 55;
       const wantNear = fpCam ? 0.1 : 1;
       if (Math.abs(camera.fov - wantFov) > 0.05 || camera.near !== wantNear) {
         camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6);
@@ -2216,9 +2228,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     window.addEventListener("resize", onResize);
 
     // ── zoom: mouse wheel, trackpad pinch and touch pinch share one range ──
-    // (third person only — the head-cam keeps its own framing)
+    // (follow view only — head-cam and chase keep their own framing)
     const setZoom = (d: number) => {
-      if (viewState.firstPerson) return;
+      if (viewState.mode !== 0) return;
       camDist = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, d));
     };
     const onWheel = (e: WheelEvent) => {
