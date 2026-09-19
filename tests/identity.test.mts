@@ -2,10 +2,10 @@
 // Whose name shows where, locked in as executable specs:
 //
 //   3D ......... my overhead tag is hidden, everyone else keeps theirs
-//   HUD ........ my name lives top-right on its own line ("you · …"),
-//                in both layouts, tapping it opens profile customization
-//   MOBILE ..... profile entry sits in the top bar (not just the ⋯ menu),
-//                and the panel copy matches the hidden-tag reality
+//   HUD ........ my name appears nowhere on screen (no overhead, no chip)
+//   PROFILE .... the customizer opens from the top-left room card on BOTH
+//                layouts (desktop button + mobile button), so name/look/
+//                color are editable everywhere — plus the ⋯ tile on mobile
 //
 // Run: `npx tsx tests/identity.test.mts` (or `npm test` runs every suite)
 // Pure Node — no browser, no dev server. Fails non-zero on violation.
@@ -26,26 +26,27 @@ const ok = (name: string, fn: () => void) => {
   console.log(`  ✓ ${name}`);
 };
 
-console.log("identity — my name in the HUD, theirs overhead");
+console.log("identity — no self name on screen, profile on both top bars");
 
 ok("3D: my overhead tag is hidden, others keep theirs", () => {
   const scene = read("components/HallScene.tsx");
   assert.match(scene, /r\.label\.visible = id !== MY_ID/, "own tag hidden per rig sync");
 });
 
-ok("HUD: my name on its own line, top-right, both layouts", () => {
+ok("HUD: my name appears nowhere on screen", () => {
   const hud = read("components/Hud.tsx");
-  assert.match(hud, /you ·/, "you-line marker exists");
-  assert.match(hud, /<YouChip name=\{me\.name\} color=\{me\.color\} onOpen=\{p\.onOpenProfile\} \/>/, "chip wired to the profile customizer");
-  const chips = hud.match(/<YouChip /g) ?? [];
-  assert.equal(chips.length, 2, "desktop top bar + mobile top bar each carry the you-line");
+  assert.ok(!hud.includes("you ·"), "no you-name chip anywhere");
+  assert.ok(!hud.includes("YouChip"), "no you-name component anywhere");
 });
 
-ok("mobile: profile customization is one tap away in the top bar", () => {
+ok("profile: customizer opens from the top-left room card on both layouts", () => {
   const hud = read("components/Hud.tsx");
-  const mobileBar = hud.slice(hud.indexOf("function MobileHud"), hud.indexOf("options menu, top-right"));
-  assert.ok(mobileBar.includes("<YouChip"), "direct profile entry in the mobile top bar");
-  assert.ok(mobileBar.includes("onOpen={p.onOpenProfile}"), "it opens the customizer");
+  // desktop room card button (long-standing) + mobile room card button (new)
+  const entries = hud.match(/aria-label="edit profile"/g) ?? [];
+  assert.ok(entries.length >= 2, "desktop top bar + mobile top bar each carry the entry");
+  assert.match(hud, /onClick=\{p\.onOpenProfile\}/, "entries open the customizer");
+  // mobile keeps its ⋯-menu tile as a second way in
+  assert.match(hud, /\{ key: "profile", icon: "user", label: "profile", run: p\.onOpenProfile \}/, "menu tile still wired");
 });
 
 ok("panel copy matches the hidden-tag reality", () => {
