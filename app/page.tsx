@@ -30,7 +30,7 @@ import { dbConfigured } from "../lib/db";
 import { popSfx, sosSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
 import { storeProfile } from "../lib/auth";
-import { cycleViewMode, onViewChange } from "../lib/view-state";
+import { cycleViewMode, onViewChange, viewState } from "../lib/view-state";
 import { IDLE_CONTEXT, type BallState, type ContextState, type PlayerState } from "../lib/hall-types";
 import { stampRoom } from "../lib/room-store";
 
@@ -207,6 +207,12 @@ function HallClient({ me }: { me: Identity }) {
   }, []);
   // V key / view tile: follow → first-person → close chase → follow …
   const handleToggleView = useCallback(() => cycleViewMode(), []);
+  // phones open right behind their character: chase is the mobile default
+  // (desktop keeps the classic dollhouse). Only while the view is untouched,
+  // so a chosen view is never overridden and no toast fires on entry.
+  useEffect(() => {
+    if (mobile && viewState.mode === 0) viewState.mode = 2;
+  }, [mobile]);
   // name the new view out loud on every switch, so a tap always answers
   const pushToast = socket.pushToast;
   useEffect(
