@@ -33,6 +33,8 @@ export interface OutfitRig {
   phase: number;
   blend: number;
   sitK: number;
+  /** 0 → 1 while driving, so the limbs ease onto the wheel instead of snapping */
+  driveK: number;
 }
 
 export interface OutfitPose {
@@ -43,6 +45,8 @@ export interface OutfitPose {
   jumping: boolean;
   /** hands on the wheel, feet on the footrest — overrides limbs below */
   driving: boolean;
+  /** steering wheel held while driving (−1 left … 1 right) — weight transfer */
+  steer?: number;
   action: "poke" | "highfive" | "wave" | null;
   actionAt?: number;
   elapsed: number;
@@ -364,7 +368,7 @@ export function buildOutfit(id: OutfitId, color: string, hairstyle?: HairstyleId
       dark: new THREE.MeshStandardMaterial({ roughness: 0.8 }),
       light: new THREE.MeshStandardMaterial({ roughness: 0.8 }),
     },
-    phase: Math.random() * Math.PI * 2, blend: 0, sitK: 0,
+    phase: Math.random() * Math.PI * 2, blend: 0, sitK: 0, driveK: 0,
     blinkT: 2 + Math.random() * 3,
   };
   oval(hips, id === "suit" ? rig.mats.dark : shared(SKIN), 0, -0.015, 0, 0.19, 0.125, 0.125);
@@ -381,10 +385,15 @@ export function buildOutfit(id: OutfitId, color: string, hairstyle?: HairstyleId
 function damp(cur: number, target: number, dt: number, rate = 8): number {
   return cur + (target - cur) * Math.min(1, dt * rate);
 }
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
 
 /** Advance the walk cycle / idle / sit / gesture pose. Call once per frame. */
 export function poseOutfit(rig: OutfitRig, dt: number, o: OutfitPose): void {
-  const active = o.moving && !o.sitting && o.speed > 0.15;
+  // a driver is never "walking" even though the car moves — otherwise the
+  // stride cycle fights the seated pose
+  const active = o.moving && !o.sitting && !o.driving && o.speed > 0.15;
   const targetBlend = active ? Math.min(1, o.speed / 3.5) : 0;
   rig.blend = damp(rig.blend, targetBlend, dt, 7);
   const b = rig.blend;
@@ -455,28 +464,33 @@ export function poseOutfit(rig: OutfitRig, dt: number, o: OutfitPose): void {
     rig.armR.rotation.z = -0.7;
   }
 
-  // driving — thighs forward onto the footrest, hands forward to the wheel,
-  // torso upright with a slight forward lean. Overrides the stride above so
-  // the driver reads seated even at full speed.
-  if (o.driving) {
-    rig.legL.rotation.x = -1.08;
-    rig.legR.rotation.x = -1.08;
-    rig.kneeL.rotation.x = 1.5;
-    rig.kneeR.rotation.x = 1.5;
-    rig.armL.rotation.x = -0.95;
-    rig.armR.rotation.x = -0.95;
-    rig.armL.rotation.z = 0.22;
-    rig.armR.rotation.z = -0.22;
-    rig.elbowL.rotation.x = -0.4;
-    rig.elbowR.rotation.x = -0.4;
-    rig.torso.rotation.x = 0.14;
-    rig.torso.rotation.y = 0;
-    rig.hips.rotation.y = 0;
-    rig.hips.position.x = 0;
-    rig.head.rotation.x = 0.02;
+  // driving — thighs forward onto the pedals, hands out to the wheel, torso
+  // upright with a slight forward lean. The limbs EASE into place (driveK)
+  // instead of snapping, so hopping in reads as sitting down and hopping out
+  // as standing up. Blended over whatever the walk / sit pose left behind.
+  rig.driveK = damp(rig.driveK, o.driving ? 1 : 0, dt, 6);
+  const dk = rig.driveK;
+  if (dk > 0.001) {
+    const t = dk;
+    rig.legL.rotation.x = lerp(rig.legL.rotation.x, -1.5, t);
+    rig.legR.rotation.x = lerp(rig.legR.rotation.x, -1.5, t);
+    rig.kneeL.rotation.x = lerp(rig.kneeL.rotation.x, 1.55, t);
+    rig.kneeR.rotation.x = lerp(rig.kneeR.rotation.x, 1.55, t);
+    rig.armL.rotation.x = lerp(rig.armL.rotation.x, -1.15, t);
+    rig.armR.rotation.x = lerp(rig.armR.rotation.x, -1.15, t);
+    rig.armL.rotation.z = lerp(rig.armL.rotation.z, 0.2, t);
+    rig.armR.rotation.z = lerp(rig.armR.rotation.z, -0.2, t);
+    rig.elbowL.rotation.x = lerp(rig.elbowL.rotation.x, -0.35, t);
+    rig.elbowR.rotation.x = lerp(rig.elbowR.rotation.x, -0.35, t);
+    rig.torso.rotation.x = lerp(rig.torso.rotation.x, 0.17, t);
+    rig.torso.rotation.y = lerp(rig.torso.rotation.y, 0, t);
+    rig.hips.rotation.y = lerp(rig.hips.rotation.y, 0, t);
+    rig.hips.position.x = lerp(rig.hips.position.x, 0, t);
+    rig.head.rotation.x = lerp(rig.head.rotation.x, 0.02, t);
+    rig.head.rotation.y = lerp(rig.head.rotation.y, (o.steer ?? 0) * 0.12, t);
     if (rig.skirt) {
-      rig.skirt.rotation.x = -0.55;
-      rig.skirt.rotation.z = 0;
+      rig.skirt.rotation.x = lerp(rig.skirt.rotation.x, -0.55, t);
+      rig.skirt.rotation.z = lerp(rig.skirt.rotation.z, 0, t);
     }
   }
 
@@ -506,5 +520,11 @@ export function poseOutfit(rig: OutfitRig, dt: number, o: OutfitPose): void {
     for (const m of [rig.mats.main, rig.mats.dark, rig.mats.light]) {
       if (m.emissiveIntensity !== 0 || m.emissive.r !== 0) m.emissive.setRGB(0, 0, 0);
     }
+  }
+
+  // steering weight transfer — applied last so the bonk wobble above can't
+  // wipe it, and skipped while freshly bonked so a hit still reads clean
+  if (dk > 0.001 && o.steer && o.hitK <= 0.003) {
+    rig.torso.rotation.z += -o.steer * 0.06 * dk;
   }
 }

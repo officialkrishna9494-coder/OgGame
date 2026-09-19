@@ -12,7 +12,7 @@ import { ejectBall, handPoint, PICKUP_RADIUS, reachField, stepBall, TOUCH_FLOOR,
 import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, inCourt } from "../lib/hall-layout";
 import { buildEnvironment, type CourtMode } from "./scene/environment";
 import { buildOutfit, disposeOutfit, OUTFIT_LABEL_Y, poseOutfit, setHairstyle, tintOutfit, type OutfitRig } from "./scene/outfits";
-import { buildCart, disposeCart, poseCart, CART_RIDER_Y, type CartRig } from "./scene/carts";
+import { buildCart, cartSeatOffset, disposeCart, poseCart, CART_RIDER_Y, type CartRig } from "./scene/carts";
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
@@ -1043,6 +1043,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     const ballPhys: BallState = { ...stateRef.current.ball };
     ejectBall(ballPhys);
     const hand = { x: 0, y: 0, z: 0 }; // scratch for carried-ball placement
+    const seatOff = { x: 0, z: 0 }; // scratch for the driver's seat offset
     let lastNetBall = JSON.stringify(ballPhys);
     let lastMoveSent = 0;
     let lastMoveFlag = "";
@@ -1697,14 +1698,19 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         const driverSim = driverCartId ? cartSim.get(driverCartId) : undefined;
         const driving = !!driverCartId && !!driverSim;
         if (driving && driverSim) {
-          g.position.set(driverSim.x, CART_RIDER_Y, driverSim.z);
+          // the rider sits ON the seat cushion, which is set back behind the
+          // car's origin — otherwise they perch on the steering column
+          cartSeatOffset(driverSim.facing, seatOff);
+          const seatX = driverSim.x + seatOff.x;
+          const seatZ = driverSim.z + seatOff.z;
+          g.position.set(seatX, CART_RIDER_Y, seatZ);
           g.rotation.y = driverSim.facing;
           // fresh hop-in: glide the hips from the door into the seat
           if (id === MY_ID && enterTween && performance.now() - enterTween.at < 350) {
             const k = (performance.now() - enterTween.at) / 350;
             const e = k * k * (3 - 2 * k);
-            g.position.x += (enterTween.x - driverSim.x) * (1 - e);
-            g.position.z += (enterTween.z - driverSim.z) * (1 - e);
+            g.position.x += (enterTween.x - seatX) * (1 - e);
+            g.position.z += (enterTween.z - seatZ) * (1 - e);
           }
         } else if (id === MY_ID) {
           g.position.set(me.x, me.y, me.z);
@@ -1738,6 +1744,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           floorSit: p.sitting && p.seat == null,
           jumping,
           driving,
+          steer: driving ? (driverSim?.steer ?? 0) : 0,
           action: p.action ?? null,
           actionAt: p.actionAt,
           elapsed,
