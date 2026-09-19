@@ -1255,6 +1255,13 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     boardTex.needsUpdate = true;
   };
 
+  // follow view is the default (open dollhouse, no upper floor): start both
+  // view-gated groups hidden to match enclosureOn = false. Three.js groups
+  // default to visible, and setEnclosure(false) early-returns on the flag —
+  // without this the ceiling/front wall render until the first view switch.
+  enclosure.visible = false;
+  raceGated.visible = false;
+
   return {
     tick: (t, dt) => {
       for (const fn of ticks) fn(t, dt);
