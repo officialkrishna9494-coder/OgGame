@@ -19,6 +19,7 @@ import { useInteraction, type Interaction } from "../lib/useInteraction";
 import type { VoiceStatus } from "../lib/useVoice";
 import { FullscreenNudge, FullscreenToggle } from "./FullscreenControls";
 import { Icon, isIconName, type IconName } from "./icons";
+import { hallJump } from "./HallScene";
 import InteractPrompt, { HoldRing, KeyCap } from "./InteractPrompt";
 import Joystick from "./Joystick";
 
@@ -468,6 +469,18 @@ function MobileHud(p: HudProps) {
         ref={clusterRef}
         className="absolute bottom-[calc(var(--safe-b)+3.5rem)] right-[calc(var(--safe-r)+2.25rem)] flex w-[76px] flex-col items-center gap-3"
       >
+        {/* hop — the stick has no spacebar, so jumping needs its own thumb button */}
+        <button
+          onPointerDown={(e) => {
+            e.preventDefault();
+            hallJump.fn?.();
+          }}
+          title="hop"
+          aria-label="hop"
+          className="pointer-events-auto flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/90 text-[#4a3f55] shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90"
+        >
+          <Icon name="caretUp" size={22} />
+        </button>
         <button
           onClick={() => (menuOpen ? closeMenu() : setMenuOpen(true))}
           title="actions & social"

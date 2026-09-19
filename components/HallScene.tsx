@@ -339,6 +339,18 @@ function lerpAngle(a: number, b: number, t: number): number {
 }
 
 export const hallToss: { fn: null | (() => void) } = { fn: null };
+/** mobile hop button — the on-screen joystick has no spacebar, so this is it */
+export const hallJump: { fn: null | (() => void) } = { fn: null };
+
+// jump take-off velocity (gravity is 14) — apex ≈ 1.2 m, enough to vault the
+// bleachers, coffee table, stools and cushions, but not the sofa or counter
+const JUMP_VY = 5.8;
+// knee allowance: furniture at or below the feet + this never blocks, so a
+// running jump carries over it instead of sticking mid-air
+const STEP_KNEE = 0.28;
+// only low furniture is vaultable — sofa, counter, shelves and plants stay
+// solid no matter how high you hop, so the layout keeps its meaning
+const VAULT_MAX = 1.0;
 
 export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySocketId, players, ball, room, tv, game, rps, sos, dodge, serverOffset, onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -938,6 +950,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       vy: 0,
       facing: Math.PI,
       sitting: false,
+      grounded: true,
     };
     const keys = new Set<string>();
     // typing in chat / admin inputs must never steer the character.
@@ -958,9 +971,13 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       }
       keys.add(k);
       if (k === " ") {
-        if (me.y < 0.01 && !me.sitting) me.vy = 5.2;
+        if (me.grounded && !me.sitting) me.vy = JUMP_VY;
       }
     };
+    const doJump = () => {
+      if (me.grounded && !me.sitting) me.vy = JUMP_VY;
+    };
+    hallJump.fn = doJump;
     const kd = onKey(true);
     const ku = onKey(false);
     const clearKeys = () => keys.clear();
@@ -1086,25 +1103,41 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         if (sp > 0.4) me.facing = Math.atan2(me.vx, me.vz);
       }
 
-      // gravity / jump — skipped while sitting so gravity never fights
+      // gravity + vaulting — skipped while sitting so gravity never fights
       // the seat glide (that fight was the perched "jumping" jitter)
       if (!sitting) {
-        me.vy -= 14 * dt;
-        me.y += me.vy * dt;
-        if (me.y <= 0) {
-          me.y = 0;
-          me.vy = 0;
-        }
-      } else {
-        me.vy = 0;
-      }
-
-      // collisions — skipped while sitting (perched sitters rest ON furniture)
-      if (!sitting) {
+        // low furniture never blocks once the feet are above its top: a
+        // running jump carries over coffee tables, stools, cushions and the
+        // bleachers instead of sticking to them mid-air
         for (const c of COLLIDERS) {
+          const top = c.y1 ?? 0;
+          if (top <= VAULT_MAX && me.y >= top - STEP_KNEE) continue;
           const r = resolveCircleAABB(me.x, me.z, 0.38, c);
           me.x = r.x;
           me.z = r.z;
+        }
+        // ground support — the highest top underfoot close enough to stand
+        // on, so jumps land ON low furniture instead of falling through it
+        // (and tiny curbs like the hearth step up with no hop at all)
+        let ground = 0;
+        for (const c of COLLIDERS) {
+          const top = c.y1 ?? 0;
+          if (top <= 0.001 || top > VAULT_MAX || top > me.y + STEP_KNEE) continue;
+          if (
+            me.x > c.x - c.hx - 0.15 && me.x < c.x + c.hx + 0.15 &&
+            me.z > c.z - c.hz - 0.15 && me.z < c.z + c.hz + 0.15
+          ) {
+            if (top > ground) ground = top;
+          }
+        }
+        me.vy -= 14 * dt;
+        me.y += me.vy * dt;
+        if (me.y <= ground) {
+          me.y = ground;
+          me.vy = 0;
+          me.grounded = true;
+        } else {
+          me.grounded = false;
         }
         // soft player-player push
         for (const [id, p] of Object.entries(st.players)) {
@@ -1117,6 +1150,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             me.z = p.z + (dz / d) * 0.75;
           }
         }
+      } else {
+        me.vy = 0;
+        me.grounded = true;
       }
       me.x = Math.max(-HALL_BOUNDS.x, Math.min(HALL_BOUNDS.x, me.x));
       me.z = Math.max(HALL_BOUNDS.zMin, Math.min(HALL_BOUNDS.zMax, me.z));
@@ -1947,6 +1983,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       if (idle.cancelIdleCallback) idle.cancelIdleCallback(warmId);
       else window.clearTimeout(warmId);
       hallToss.fn = null;
+      hallJump.fn = null;
       promptAnchor.key = null;
       window.clearInterval(roomTimer);
       window.removeEventListener("resize", onResize);
