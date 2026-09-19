@@ -227,10 +227,22 @@ ok("bounds: balls, walkers and karts cover the whole bigger room", () => {
   // doorway passes, masonry blocks
   const through = clampToRooms(-23.2, 10, 0.4);
   assert.ok(through.x < HALL.xMin, "doorway lets you through");
-  const wall = clampToRooms(-23.2, 0, 0.4);
-  assert.equal(wall.x, HALL.xMin + 0.4, "shared wall blocks off the gap");
+  // the shared wall stops both sides at the nearer surface — bodies never
+  // teleport across (race-side walkers used to pop into the hall)
+  const hallSide = clampToRooms(-23.1, 0, 0.38);
+  assert.equal(hallSide.x, HALL.xMin + 0.38, "hall side stops east of the wall");
+  const raceSide = clampToRooms(-23.7, 0, 0.38);
+  assert.equal(raceSide.x, RACE.xMax - 0.4 - 0.38, "race side stops west of the wall");
+  assert.ok(raceSide.x < HALL.xMin, "race side never crosses into the hall");
+  const kartWest = clampToRooms(-23.5, 0, 0.8);
+  assert.ok(kartWest.x < HALL.xMin, "karts stop west of the wall too");
+  const kartEast = clampToRooms(-22.9, 0, 0.8);
+  assert.ok(kartEast.x > RACE.xMax, "karts stop east of the wall too");
   const far = clampToRooms(-200, 0, 0.4);
   assert.equal(far.x, RACE.xMin + 0.4, "far wall holds");
+  // the server runs the same clamp on moves, so lag can't walk through rooms
+  const server = read("server.js");
+  assert.match(server, /clampToRooms\(Number\(p\.x\)/, "server clamps player moves");
 });
 
 // ── 9 · rider glued to the seat + speed-scaled launches ─────────────────────

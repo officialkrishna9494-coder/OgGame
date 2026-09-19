@@ -479,12 +479,17 @@ export function clampToRooms(x: number, z: number, r: number): { x: number; z: n
   z = Math.max(zMin, Math.min(zMax, z));
   const face = HALL.xMin + r; // room-1 side of the shared face
   const back = RACE.xMax - 0.4 - r; // room-2 side of the masonry
+  // masonry mid-plane (independent of r) — bodies stop at the surface they
+  // came from, like the ball does, and never teleport across to the room
+  // they never entered
+  const mid = RACE.xMax - 0.2;
   const doorway = z > DOOR_GAP.z0 + r && z < DOOR_GAP.z1 - r;
   if (x >= face) {
     x = Math.min(HALL.xMax - 0.4, x); // room 1 (or leaning on its side)
   } else if (x > back) {
-    // inside the masonry band: the doorway keeps you, the wall pushes east
-    if (!doorway) x = face;
+    // inside the masonry band: the doorway lets you through, otherwise stop
+    // at the nearer surface (hall side pushes east, race side pushes west)
+    if (!doorway) x = x > mid ? face : back;
   } else {
     x = Math.max(RACE.xMin + 0.4, x); // room 2, already past the wall
   }

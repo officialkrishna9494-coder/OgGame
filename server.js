@@ -304,6 +304,9 @@ app.prepare().then(() => {
     socket.on("hall:move", (p) => {
       const m = meta.get(socket.id);
       if (!m) return;
+      // server-side walls: never trust a position through the masonry —
+      // same clamp the clients run, so lag or hacks can't walk through rooms
+      const cl = layout.clampToRooms(Number(p.x) || 0, Number(p.z) || 0, 0.38);
       // cartId is only kept when this socket actually drives that cart
       const claimed = typeof p.cartId === "string" ? p.cartId : null;
       const cart = claimed ? carts.find((c) => c.id === claimed) : null;
@@ -313,8 +316,8 @@ app.prepare().then(() => {
         color: m.color,
         outfit: m.outfit,
         hairstyle: m.hairstyle,
-        x: Number(p.x) || 0,
-        z: Number(p.z) || 0,
+        x: cl.x,
+        z: cl.z,
         facing: Number(p.facing) || 0,
         moving: !!p.moving,
         sitting: !!p.sitting,
