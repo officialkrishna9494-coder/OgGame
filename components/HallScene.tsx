@@ -16,6 +16,7 @@ import { buildCart, cartSeatOffset, disposeCart, poseCart, CART_RIDER_Y, type Ca
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
+import { drivePad } from "../lib/drive-pad";
 import { cycleViewMode, isFirstPerson, viewState } from "../lib/view-state";
 import { resetTurbo, turboState } from "../lib/turbo-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
@@ -1152,9 +1153,11 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       // Driving reads its own axes from the RAW input, before the walk vector
       // is normalised — otherwise holding W+D gave 0.71 throttle and 0.71
       // lock at once, so a turn always bled speed. WASD and the arrow keys
-      // are interchangeable: both feed ix / iz identically below.
-      const driveThrottle = Math.max(-1, Math.min(1, -iz));
-      const driveSteer = Math.max(-1, Math.min(1, ix));
+      // are interchangeable: both feed ix / iz identically below. The mobile
+      // car hub (drivePad) adds on top; every flag is false on desktop, so
+      // the keyboard path is untouched there.
+      const driveThrottle = Math.max(-1, Math.min(1, -iz + (drivePad.up ? 1 : 0) - (drivePad.down ? 1 : 0)));
+      const driveSteer = Math.max(-1, Math.min(1, ix + (drivePad.right ? 1 : 0) - (drivePad.left ? 1 : 0)));
       const len = Math.hypot(ix, iz);
       if (len > 1) {
         ix /= len;

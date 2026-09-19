@@ -12,8 +12,22 @@ export const viewState = {
   mode: 0 as ViewMode,
 };
 
-export function cycleViewMode(): void {
+type ViewListener = (mode: ViewMode) => void;
+const listeners = new Set<ViewListener>();
+
+/** cycle follow → first-person → chase → follow …; returns the new mode */
+export function cycleViewMode(): ViewMode {
   viewState.mode = ((viewState.mode + 1) % 3) as ViewMode;
+  listeners.forEach((cb) => cb(viewState.mode));
+  return viewState.mode;
+}
+
+/** react to every switch (V key and view tile share this one path) */
+export function onViewChange(cb: ViewListener): () => void {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
 }
 
 /** true in first-person (head-cam): own avatar hides, zoom parks, FOV widens */

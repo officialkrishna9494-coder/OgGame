@@ -63,7 +63,9 @@ export default function JoinOverlay({ roomName, tagline, onJoin }: Props) {
           <br />
           hop in a kart with E, then the same keys drive it · space for turbo
           <br />
-          on mobile: joystick to move, hop to jump, ACT to interact
+          on mobile: joystick to move, round button to jump, ACT to interact
+          <br />
+          in a kart: ◀ ▶ steer left, ▲ ▼ pedals right, hold TURBO for boost
         </p>
       </div>
     </div>

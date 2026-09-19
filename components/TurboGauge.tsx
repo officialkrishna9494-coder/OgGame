@@ -24,6 +24,9 @@ export default function TurboGauge() {
     let shown: boolean | null = null;
     let active: boolean | null = null;
     let empty: boolean | null = null;
+    // touch drivers use the CarPad hub (its TURBO button carries the tank),
+    // so the floating pill parks itself on coarse pointers
+    const coarse = window.matchMedia("(pointer: coarse)");
     const tick = () => {
       raf = requestAnimationFrame(tick);
       const el = wrapRef.current;
@@ -31,14 +34,14 @@ export default function TurboGauge() {
       const fill = fillRef.current;
       if (!el || !pill || !fill) return;
 
-      const driving = turboState.driving;
-      if (driving !== shown) {
-        shown = driving;
-        el.style.visibility = driving ? "visible" : "hidden";
-        el.style.opacity = driving ? "1" : "0";
-        el.style.transform = driving ? "translate(0, 0)" : "translate(0, 8px)";
+      const show = turboState.driving && !coarse.matches;
+      if (show !== shown) {
+        shown = show;
+        el.style.visibility = show ? "visible" : "hidden";
+        el.style.opacity = show ? "1" : "0";
+        el.style.transform = show ? "translate(-50%, 0)" : "translate(-50%, -8px)";
       }
-      if (!driving) return;
+      if (!show) return;
 
       const level = Math.max(0, Math.min(1, turboState.level));
       fill.style.transform = `scaleX(${level.toFixed(3)})`;

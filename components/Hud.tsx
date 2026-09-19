@@ -22,6 +22,7 @@ import { Icon, isIconName, type IconName } from "./icons";
 import { hallJump } from "./HallScene";
 import InteractPrompt, { HoldRing, KeyCap } from "./InteractPrompt";
 import Joystick from "./Joystick";
+import CarPad from "./CarPad";
 import TurboGauge from "./TurboGauge";
 
 interface Props {
@@ -403,6 +404,8 @@ function MobileHud(p: HudProps) {
   ];
   // one glanceable signal on the closed ⋯ button
   const menuAlert = !!p.unreadCount || p.rpsStatus === "picking" || p.rpsStatus === "revealing";
+  // driving swaps the whole thumb layout for the CarPad hub below
+  const driving = !!p.players["me"]?.cartId;
 
   const label = "text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#a08fb5]";
 
@@ -456,48 +459,19 @@ function MobileHud(p: HudProps) {
         </div>
       </div>
 
-      {/* ── fullscreen nudge + toasts ── */}
-      <div className="absolute left-1/2 top-[calc(var(--safe-t)+3rem)] flex w-max max-w-[min(86vw,420px)] -translate-x-1/2 flex-col items-center gap-1">
-        {nudgeOpen && fs.offer && !menuOpen && (
-          <FullscreenNudge offer={fs.offer} onGo={goFullscreen} onDismiss={dismissNudge} />
-        )}
-        {p.toasts.slice(-1).map((t) => (
-          <ToastPill key={t.id} toast={t} compact />
-        ))}
-        {showBallHint && (
-          <div className="animate-pop-in flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#4a3f55] shadow ring-1 ring-black/[0.06]">
-            <Icon name="toss" size={13} /> step onto the ball to grab it
-          </div>
-        )}
-      </div>
-
-      {/* ── joystick, left thumb zone ── */}
-      <Joystick />
-
-      {/* ── right cluster: ⋯ menu above the universal ACT button ──
-          ACT's slot is always reserved, so ⋯ never jumps when ACT pops in. */}
+      {/* ── options menu, top-right: the tile grid lives up here so the right
+          thumb column stays muscle-clean (jump / act in person, pedals in
+          the car). Opens downward; `invisible` is never hit-testable. ── */}
       <div
         ref={clusterRef}
-        className="absolute bottom-[calc(var(--safe-b)+3.5rem)] right-[calc(var(--safe-r)+2.25rem)] flex w-[76px] flex-col items-center gap-3"
+        className="pointer-events-none absolute right-[calc(var(--safe-r)+0.5rem)] top-[calc(var(--safe-t)+3.25rem)] flex flex-col items-end gap-2"
       >
-        {/* hop — the stick has no spacebar, so jumping needs its own thumb button */}
-        <button
-          onPointerDown={(e) => {
-            e.preventDefault();
-            hallJump.fn?.();
-          }}
-          title="hop"
-          aria-label="hop"
-          className="pointer-events-auto flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/90 text-[#4a3f55] shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90"
-        >
-          <Icon name="caretUp" size={22} />
-        </button>
         <button
           onClick={() => (menuOpen ? closeMenu() : setMenuOpen(true))}
           title="actions & social"
           aria-label={menuOpen ? "close menu" : "open menu"}
           aria-expanded={menuOpen}
-          className={`pointer-events-auto relative flex h-12 w-12 touch-manipulation items-center justify-center rounded-full shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90 ${menuOpen ? "bg-[#3d3347] text-white" : "bg-white/90 text-[#4a3f55]"}`}
+          className={`pointer-events-auto relative flex h-11 w-11 touch-manipulation items-center justify-center rounded-full shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90 ${menuOpen ? "bg-[#3d3347] text-white" : "bg-white/90 text-[#4a3f55]"}`}
         >
           <span className={`flex transition-transform duration-200 ${menuOpen ? "rotate-90" : ""}`}>
             <Icon name={menuOpen ? "close" : "menu"} size={20} />
@@ -506,41 +480,12 @@ function MobileHud(p: HudProps) {
             <span className="absolute right-0.5 top-0.5 block h-3 w-3 rounded-full bg-[#ff3b3b] ring-2 ring-white" />
           )}
         </button>
-
-        <div className="relative h-[76px] w-[76px]">
-          {action ? (
-            <button
-              key={action.key}
-              {...interaction.bind}
-              onContextMenu={(e) => e.preventDefault()}
-              aria-label={action.prompt}
-              style={{ boxShadow: `0 10px 28px -8px ${action.glow}`, borderColor: action.glow }}
-              className="animate-pop-in pointer-events-auto relative flex h-full w-full touch-manipulation select-none items-center justify-center rounded-full border-2 bg-white/95 text-[#3d3347] backdrop-blur transition-transform [-webkit-touch-callout:none] active:scale-90"
-            >
-              <span key={interaction.pulse} className={`flex flex-col items-center ${interaction.pulse ? "animate-act-press" : ""}`}>
-                <Icon name={action.icon} size={26} />
-                <span className="mt-1 text-[9px] font-black uppercase tracking-[0.16em]">act</span>
-                <span className="max-w-[62px] truncate text-[8px] font-bold uppercase tracking-wide text-[#8a7f98]">
-                  {action.hold && interaction.holding ? "hold…" : action.label}
-                </span>
-              </span>
-              {interaction.holding && <HoldRing glow={action.glow} width={6} />}
-            </button>
-          ) : (
-            // resting ghost: marks where contextual actions will appear
-            <span className="absolute inset-2 rounded-full border-2 border-dashed border-white/45" />
-          )}
-        </div>
-
-        {/* menu popover — opens left of the cluster, bottom-aligned, and
-            scrolls when the screen is short (browser bars, small phones).
-            `invisible` when closed: visibility:hidden is never hit-testable. */}
         <div
           role="menu"
-          className={`absolute bottom-0 right-[calc(100%+0.75rem)] flex max-h-[calc(100dvh-var(--safe-t)-var(--safe-b)-7.5rem)] w-[15.5rem] origin-bottom-right flex-col rounded-[20px] bg-white/95 shadow-2xl ring-1 ring-black/[0.08] backdrop-blur transition-all duration-200 ${menuOpen ? "pointer-events-auto visible translate-x-0 scale-100 opacity-100" : "pointer-events-none invisible translate-x-2 scale-95 opacity-0"}`}
+          className={`w-[15.5rem] origin-top-right rounded-[20px] bg-white/95 shadow-2xl ring-1 ring-black/[0.08] backdrop-blur transition-all duration-200 ${menuOpen ? "pointer-events-auto visible translate-y-0 scale-100 opacity-100" : "pointer-events-none invisible -translate-y-2 scale-95 opacity-0"}`}
         >
           {/* block (not flex) scroller: children overflow and scroll instead of squashing */}
-          <div className="min-h-0 overflow-y-auto overscroll-contain p-2 [scrollbar-width:thin]">
+          <div className="max-h-[calc(100dvh-var(--safe-t)-var(--safe-b)-9rem)] min-h-0 overflow-y-auto overscroll-contain p-2 [scrollbar-width:thin]">
             {view === "grid" ? (
               <>
                 <p className={`flex items-center gap-1 truncate px-1 pb-1.5 ${label}`}>
@@ -609,6 +554,69 @@ function MobileHud(p: HudProps) {
           </div>
         </div>
       </div>
+
+      {/* ── fullscreen nudge + toasts ── */}
+      <div className="absolute left-1/2 top-[calc(var(--safe-t)+3rem)] flex w-max max-w-[min(86vw,420px)] -translate-x-1/2 flex-col items-center gap-1">
+        {nudgeOpen && fs.offer && !menuOpen && (
+          <FullscreenNudge offer={fs.offer} onGo={goFullscreen} onDismiss={dismissNudge} />
+        )}
+        {p.toasts.slice(-1).map((t) => (
+          <ToastPill key={t.id} toast={t} compact />
+        ))}
+        {showBallHint && (
+          <div className="animate-pop-in flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#4a3f55] shadow ring-1 ring-black/[0.06]">
+            <Icon name="toss" size={13} /> step onto the ball to grab it
+          </div>
+        )}
+      </div>
+
+      {/* ── joystick, left thumb zone (hidden in the car: the hub steers) ── */}
+      {!driving && <Joystick />}
+
+      {/* ── on-foot right column: ACT above a big JUMP — this round button is
+          the mobile SPACE. In the car the column swaps for the CarPad hub. ── */}
+      {driving ? (
+        <CarPad action={action} interaction={interaction} />
+      ) : (
+        <div className="absolute bottom-[calc(var(--safe-b)+4.5rem)] right-[calc(var(--safe-r)+2.25rem)] flex w-[76px] flex-col items-center gap-3">
+          <div className="relative h-[76px] w-[76px]">
+          {action ? (
+            <button
+              key={action.key}
+              {...interaction.bind}
+              onContextMenu={(e) => e.preventDefault()}
+              aria-label={action.prompt}
+              style={{ boxShadow: `0 10px 28px -8px ${action.glow}`, borderColor: action.glow }}
+              className="animate-pop-in pointer-events-auto relative flex h-full w-full touch-manipulation select-none items-center justify-center rounded-full border-2 bg-white/95 text-[#3d3347] backdrop-blur transition-transform [-webkit-touch-callout:none] active:scale-90"
+            >
+              <span key={interaction.pulse} className={`flex flex-col items-center ${interaction.pulse ? "animate-act-press" : ""}`}>
+                <Icon name={action.icon} size={26} />
+                <span className="mt-1 text-[9px] font-black uppercase tracking-[0.16em]">act</span>
+                <span className="max-w-[62px] truncate text-[8px] font-bold uppercase tracking-wide text-[#8a7f98]">
+                  {action.hold && interaction.holding ? "hold…" : action.label}
+                </span>
+              </span>
+              {interaction.holding && <HoldRing glow={action.glow} width={6} />}
+            </button>
+          ) : (
+            // resting ghost: marks where contextual actions will appear
+            <span className="absolute inset-2 rounded-full border-2 border-dashed border-white/45" />
+          )}
+        </div>
+        {/* jump — the stick has no spacebar, so this round button IS space */}
+        <button
+          onPointerDown={(e) => {
+            e.preventDefault();
+            hallJump.fn?.();
+          }}
+          title="jump"
+          aria-label="jump"
+          className="pointer-events-auto flex h-14 w-14 touch-manipulation items-center justify-center rounded-full bg-white/90 text-[#4a3f55] shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90"
+        >
+          <Icon name="caretUp" size={24} />
+        </button>
+        </div>
+      )}
     </div>
   );
 }

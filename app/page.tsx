@@ -30,7 +30,7 @@ import { dbConfigured } from "../lib/db";
 import { popSfx, sosSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
 import { storeProfile } from "../lib/auth";
-import { cycleViewMode } from "../lib/view-state";
+import { cycleViewMode, onViewChange } from "../lib/view-state";
 import { IDLE_CONTEXT, type BallState, type ContextState, type PlayerState } from "../lib/hall-types";
 import { stampRoom } from "../lib/room-store";
 
@@ -207,6 +207,22 @@ function HallClient({ me }: { me: Identity }) {
   }, []);
   // V key / view tile: follow → first-person → close chase → follow …
   const handleToggleView = useCallback(() => cycleViewMode(), []);
+  // name the new view out loud on every switch, so a tap always answers
+  const pushToast = socket.pushToast;
+  useEffect(
+    () =>
+      onViewChange((mode) =>
+        pushToast(
+          mode === 1
+            ? "first-person view — through your eyes"
+            : mode === 2
+              ? "chase view — right behind you"
+              : "follow view — classic dollhouse",
+          "view"
+        )
+      ),
+    [pushToast]
+  );
   // persist first (throws when offline/unsigned), bubble overhead on success
   const handleChatSend = useCallback(
     async (text: string) => {
