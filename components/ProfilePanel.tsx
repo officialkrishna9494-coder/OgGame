@@ -68,7 +68,7 @@ export default function ProfilePanel({ initial, onSave, onClose }: Props) {
           autoFocus
           className="mt-3 w-full rounded-2xl border border-[#e8dcc8] bg-[#fffaf2] px-4 py-3 text-center text-[15px] font-semibold text-[#3d3347] outline-none placeholder:font-normal placeholder:text-[#b9abcb] focus:border-[#ff8fab] focus:ring-4 focus:ring-[#ff8fab]/15"
         />
-        <p className="mt-1.5 text-[11px] text-[#a99cbb]">this name floats over your head in the hall</p>
+        <p className="mt-1.5 text-[11px] text-[#a99cbb]">friends see this name floating over you</p>
 
         <div className="mt-4">
           <OutfitPicker outfit={outfit} color={color} hairstyle={hairstyle} onHairstyle={setHairstyle} onOutfit={setOutfit} onColor={setColor} />

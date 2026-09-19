@@ -39,6 +39,16 @@ ok("door: big opening on the left wall, front (camera) half", () => {
   assert.ok(DOOR_GAP.h >= 4, `door ${DOOR_GAP.h} m tall`);
   assert.ok(DOOR_GAP.z0 > 0, "door sits on the front (camera) half, the bottom side");
   assert.ok(DOOR_GAP.z1 <= HALL.zMax, "door stays inside the shared wall");
+  // the driving lane through the door stays empty — no lamp post (or
+  // anything else) standing in front of it on either side
+  for (const p of PROPS) {
+    if (p.y0 != null && p.y0 > 0) continue;
+    const ex = p.shape === "box" ? p.hx : p.r;
+    const ez = p.shape === "box" ? p.hz : p.r;
+    const inX = p.x - ex < -16 && p.x + ex > -30;
+    const inZ = p.z - ez < 12.8 && p.z + ez > 7.2;
+    assert.ok(!(inX && inZ), `prop at (${p.x},${p.z}) blocks the doorway lane`);
+  }
 });
 
 // ── 2 · bigger room west ─────────────────────────────────────────────────────

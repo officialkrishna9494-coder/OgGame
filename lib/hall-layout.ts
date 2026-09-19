@@ -109,7 +109,7 @@ export const PLANTS = [
   { x: 15.4, z: 16.0, s: 1.0 },
   { x: 21.6, z: 12.4, s: 1.2 },
 ];
-export const FLOOR_LAMPS = [...LOUNGE.lamps, NOOK.lamp, { x: -19.6, z: 10.6 }, { x: 19.6, z: 6.2 }];
+export const FLOOR_LAMPS = [...LOUNGE.lamps, NOOK.lamp, { x: -14, z: 12 }, { x: 19.6, z: 6.2 }];
 
 // ── spawns ──
 export const SPAWN = { xSpread: 6, zMin: -3.6, zMax: -0.8 };

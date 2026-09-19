@@ -1071,7 +1071,7 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     padRing.rotation.x = -Math.PI / 2;
     padRing.position.set(COURT.pad.x, 0.06, COURT.pad.z);
     court.add(padRing);
-    // scoreboard
+    // scoreboard — same screen on both faces (like the RPS board)
     const bx = COURT.board.x;
     const bz = COURT.board.z;
     court.add(mesh(new THREE.BoxGeometry(0.28, 1.5, 0.28), mat("#5b4a5e", 0.6), bx, 0.75, bz, true));
@@ -1079,6 +1079,11 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     const face = new THREE.Mesh(new THREE.PlaneGeometry(3.12, 1.76), new THREE.MeshBasicMaterial({ map: boardTex }));
     face.position.set(bx, 2.45, bz + 0.085);
     court.add(face);
+    // same screen on the back face too (like the RPS board)
+    const faceBack = new THREE.Mesh(new THREE.PlaneGeometry(3.12, 1.76), new THREE.MeshBasicMaterial({ map: boardTex }));
+    faceBack.position.set(bx, 2.45, bz - 0.085);
+    faceBack.rotation.y = Math.PI;
+    court.add(faceBack);
     // bleachers
     const bl = COURT.bleachers;
     court.add(mesh(roundedBox(1.2, 0.48, bl.len, 0.06), mat("#caa472", 0.7), bl.x - 0.6, 0.24, bl.z, true));

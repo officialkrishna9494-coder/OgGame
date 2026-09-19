@@ -977,6 +977,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         tintOutfit(r.outfit, p.color);
         (r.ring.material as THREE.MeshBasicMaterial).color.set(p.color);
       }
+      // my own name lives in the HUD's top-right "you" line — never over my
+      // own head. Everyone else keeps their floating tag (on their screens
+      // my avatar is just another player id, so they still see me).
+      r.label.visible = id !== MY_ID;
       return r;
     };
 

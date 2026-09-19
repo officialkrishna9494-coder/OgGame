@@ -84,6 +84,7 @@ export default function Hud(p: Props) {
   const [emoteOpen, setEmoteOpen] = useState(false);
   const others = Object.entries(p.players).filter(([id]) => id !== "me");
   const count = Object.keys(p.players).length;
+  const me = p.players["me"];
 
   // the one contextual action — same resolver the 3D prompt uses
   const action = resolveAction(p.context, {
@@ -161,18 +162,23 @@ export default function Hud(p: Props) {
           </button>
         </div>
 
-        <div className="pointer-events-auto flex max-w-[46vw] flex-wrap items-center justify-end gap-1.5 rounded-2xl bg-white/70 px-2.5 py-2 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
-          {others.slice(0, 8).map(([id, pl]) => (
-            <span key={id} title={pl.name} className="flex h-7 items-center gap-1 rounded-full bg-white py-0.5 pl-1 pr-2 text-[11px] font-bold text-[#4a3f55] ring-1 ring-black/[0.06]">
-              <span className="block h-5 w-5 rounded-full ring-1 ring-black/10" style={{ background: pl.color }} />
-              {pl.name.slice(0, 8)}
-            </span>
-          ))}
-          {others.length === 0 && (
-            <span className="flex items-center gap-1 px-1 text-[11px] font-medium text-[#8a7f98]">
-              <Icon name="user" size={12} /> just you… for now
-            </span>
-          )}
+        {/* others row, with my own name on a second line underneath —
+            my overhead tag is hidden in 3D, so this chip is where I live */}
+        <div className="flex flex-col items-end gap-1">
+          <div className="pointer-events-auto flex max-w-[46vw] flex-wrap items-center justify-end gap-1.5 rounded-2xl bg-white/70 px-2.5 py-2 shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
+            {others.slice(0, 8).map(([id, pl]) => (
+              <span key={id} title={pl.name} className="flex h-7 items-center gap-1 rounded-full bg-white py-0.5 pl-1 pr-2 text-[11px] font-bold text-[#4a3f55] ring-1 ring-black/[0.06]">
+                <span className="block h-5 w-5 rounded-full ring-1 ring-black/10" style={{ background: pl.color }} />
+                {pl.name.slice(0, 8)}
+              </span>
+            ))}
+            {others.length === 0 && (
+              <span className="flex items-center gap-1 px-1 text-[11px] font-medium text-[#8a7f98]">
+                <Icon name="user" size={12} /> just you… for now
+              </span>
+            )}
+          </div>
+          {me && <YouChip name={me.name} color={me.color} onOpen={p.onOpenProfile} />}
         </div>
       </div>
 
@@ -299,6 +305,24 @@ function IconWithDot({ name, dot, size = 17 }: { name: IconName; dot?: boolean; 
   );
 }
 
+/** "you" line under the others row (top-right, both layouts): my overhead
+    3D tag is hidden, so this chip is where I live — tapping it opens the
+    profile customizer, which keeps mobile one tap away too. */
+function YouChip({ name, color, onOpen }: { name: string; color: string; onOpen: () => void }) {
+  return (
+    <button
+      onClick={onOpen}
+      title="edit profile — name, look, clothing color"
+      aria-label={`edit profile — playing as ${name}`}
+      className="pointer-events-auto flex shrink-0 items-center gap-1.5 rounded-full bg-[#3d3347]/85 py-1 pl-1.5 pr-2.5 text-[11px] font-bold text-white shadow-lg ring-1 ring-white/10 backdrop-blur transition-transform hover:bg-[#3d3347] active:scale-95"
+    >
+      <span className="block h-4 w-4 shrink-0 rounded-full ring-1 ring-white/30" style={{ background: color }} />
+      <span className="max-w-[92px] truncate">you · {name.slice(0, 12)}</span>
+      <Icon name="user" size={12} className="shrink-0 text-white/60" />
+    </button>
+  );
+}
+
 function ToastPill({ toast, compact }: { toast: Toast; compact?: boolean }) {
   return (
     <div
@@ -409,6 +433,7 @@ function MobileHud(p: HudProps) {
   const menuAlert = !!p.unreadCount || p.rpsStatus === "picking" || p.rpsStatus === "revealing";
   // driving swaps the whole thumb layout for the CarPad hub below
   const driving = !!p.players["me"]?.cartId;
+  const me = p.players["me"];
 
   const label = "text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#a08fb5]";
 
@@ -446,19 +471,24 @@ function MobileHud(p: HudProps) {
             </button>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <div className="pointer-events-auto flex h-8 items-center gap-1 rounded-2xl bg-white/70 px-2 text-[#8a7f98] shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
-            {p.others.slice(0, 5).map(([id, pl]) => (
-              <span key={id} title={pl.name} className="block h-5 w-5 rounded-full ring-1 ring-black/10" style={{ background: pl.color }} />
-            ))}
-            {p.others.length === 0 && (
-              <span className="flex items-center gap-1 px-0.5 text-[10px] font-semibold">
-                <Icon name="user" size={11} /> just you
-              </span>
-            )}
-            {p.simulated && <Icon name="bot" size={13} label="demo bots" className="ml-0.5" />}
+        {/* right cluster: others row, then my name on a second line —
+            also the direct profile entry, so customization is one tap away */}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <div className="flex items-center gap-1.5">
+            <div className="pointer-events-auto flex h-8 items-center gap-1 rounded-2xl bg-white/70 px-2 text-[#8a7f98] shadow-lg ring-1 ring-black/[0.05] backdrop-blur">
+              {p.others.slice(0, 5).map(([id, pl]) => (
+                <span key={id} title={pl.name} className="block h-5 w-5 rounded-full ring-1 ring-black/10" style={{ background: pl.color }} />
+              ))}
+              {p.others.length === 0 && (
+                <span className="flex items-center gap-1 px-0.5 text-[10px] font-semibold">
+                  <Icon name="user" size={11} /> just you
+                </span>
+              )}
+              {p.simulated && <Icon name="bot" size={13} label="demo bots" className="ml-0.5" />}
+            </div>
+            {(fs.active || fs.offer) && <FullscreenToggle active={fs.active} onClick={onFullscreenToggle} />}
           </div>
-          {(fs.active || fs.offer) && <FullscreenToggle active={fs.active} onClick={onFullscreenToggle} />}
+          {me && <YouChip name={me.name} color={me.color} onOpen={p.onOpenProfile} />}
         </div>
       </div>
 
