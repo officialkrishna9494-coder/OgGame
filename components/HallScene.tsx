@@ -18,7 +18,7 @@ import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
 import { drivePad } from "../lib/drive-pad";
 import { cycleViewMode, isFirstPerson, viewState } from "../lib/view-state";
-import { tvScreenAnchor } from "../lib/tv-screen";
+import { paintTvScreen, tvScreenAnchor } from "../lib/tv-screen";
 import { resetTurbo, turboState } from "../lib/turbo-state";
 import { COLLIDERS, SOFA_SEATS } from "../lib/room-defaults";
 
@@ -399,7 +399,15 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     let viewW = W;
     let viewH = H;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      // The wall TV's real video is a DOM layer UNDER this canvas (a
+      // cross-origin iframe can never enter WebGL), so the canvas needs a real
+      // alpha channel to punch a depth-tested window for it — see tvHole.
+      // Everything else still clears to the opaque room colour, so the hall
+      // itself looks exactly the same.
+      alpha: true,
+    });
     renderer.setSize(W, H);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
@@ -496,6 +504,31 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 2.6), new THREE.MeshBasicMaterial({ map: tvTex }));
     tvScreen.position.set(TV.x, TV.screenY, TV.bodyZ + 0.12);
     scene.add(tvScreen);
+
+    // ── the window the wall TV's real picture shows through ──
+    // The video can't be a texture (a cross-origin iframe taints the canvas),
+    // so the DOM player sits under the canvas instead and this quad cuts a
+    // hole for it: zero-blending behind an EQUAL depth test clears pixels
+    // ONLY where the screen is the front-most surface. Anything standing in
+    // front — a lamp, a scoreboard, the wall of the next room — fails that
+    // test and keeps its own pixels, so the picture is occluded per pixel by
+    // real geometry instead of painting over the hall. Hidden whenever there
+    // is no live picture, so the status card underneath stays the fallback.
+    const tvHole = new THREE.Mesh(
+      tvScreen.geometry,
+      new THREE.MeshBasicMaterial({
+        transparent: true, // drawn last, after every opaque surface
+        blending: THREE.CustomBlending,
+        blendSrc: THREE.ZeroFactor,
+        blendDst: THREE.ZeroFactor,
+        depthFunc: THREE.EqualDepth,
+        depthWrite: false,
+      })
+    );
+    tvHole.position.copy(tvScreen.position);
+    tvHole.renderOrder = 1000;
+    tvHole.visible = false;
+    scene.add(tvHole);
 
     const drawTv = () => {
       const { tv: tvState, room: rm } = stateRef.current;
@@ -2295,6 +2328,12 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         lookSm.z += (tz - 4 - lookSm.z) * Math.min(1, dt * 4);
       }
       camera.lookAt(lookSm);
+      // Refresh the camera's world matrix for THIS frame before anything
+      // projects through it. renderer.render only refreshes it at the end of
+      // the tick, so projecting first would hand the in-world prompt and the
+      // wall TV's DOM quad the PREVIOUS frame's camera — the quad then trails
+      // the canvas by a frame every time the camera moves.
+      camera.updateMatrixWorld();
       // lens to match the view: wider + a close near-plane in first person
       // (the dash and the held ball live under a metre away), a touch wider
       // in close chase, classic 44 and deep precision back outside
@@ -2310,7 +2349,6 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       // like a carried item. (The hands hide with the avatar, so the normal
       // hand-spot ball would float oddly at the frame edge instead.)
       if (fpCam) {
-        camera.updateMatrixWorld();
         vmBall.set(0.45, -0.18, -1.0).applyMatrix4(camera.matrixWorld);
         const iHoldLobby =
           ballMesh.visible &&
@@ -2361,6 +2399,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           }
         }
         tvScreenAnchor.visible = show;
+        // open the hole only where the screen is unoccluded and there is a
+        // live player to show through it — the overlay's exact gate
+        tvHole.visible = show && tvScreenAnchor.ready;
         if (show) {
           tvScreenAnchor.x0 = tvPX[0];
           tvScreenAnchor.y0 = tvPY[0];
@@ -2376,6 +2417,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       // room finishes itself around an inside camera: front wall + ceiling
       // appear in first-person / chase, hide in follow (open dollhouse)
       env.setEnclosure(viewState.mode !== 0);
+      // the wall TV's DOM layer is moved here, in this very tick — same
+      // camera, same frame as the canvas, so it can't trail a moving camera
+      paintTvScreen();
       renderer.render(scene, camera);
     };
 

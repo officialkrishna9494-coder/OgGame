@@ -1,9 +1,19 @@
 // ─── Cozy Hall · live TV on the 3D screen ─────────────────────────────────────
 // The hall's TV plays the room's real YouTube video, not just a status card:
-// a muted iframe pinned exactly over the 3D screen through a per-frame CSS
-// matrix3d (cross-origin pixels can never enter WebGL, so this overlay is
-// how wall TVs show real video). Sound + controls stay in the TV panel —
-// this is the silent picture on the wall, always in sync with the room.
+// a muted iframe pinned exactly over the 3D screen (cross-origin pixels can
+// never enter WebGL, so an overlay like this is how wall TVs show real
+// video). Sound + controls stay in the TV panel — this is the silent picture
+// on the wall, always in sync with the room.
+//
+// The SCENE moves this box, not the component: the render loop projects the
+// screen's corners and paints the matrix in the tick it draws the frame, so
+// the picture sits on the set with zero frames of slip. This side only owns
+// playback and reports whether it has a frame to show.
+//
+// It also sits UNDER the canvas, not over it: the scene punches a depth-tested
+// hole through the canvas exactly where the screen is the front-most surface,
+// so whatever stands in front of the TV (a lamp, a scoreboard, the wall of the
+// next room) occludes the picture pixel for pixel instead of being painted over.
 //
 // Professional guarantees: never captures clicks (pointer-events-none),
 // hides the moment the screen faces away / has no video / the API is
@@ -17,11 +27,8 @@
 import { useEffect, useRef } from "react";
 import type { TvState } from "../lib/hall-types";
 import { loadYouTubeApi } from "../lib/youtube";
-import { quadToMatrix3d, tvScreenAnchor } from "../lib/tv-screen";
+import { TV_OVERLAY_H, TV_OVERLAY_W, tvScreenAnchor } from "../lib/tv-screen";
 
-// overlay box — same aspect as the 3D screen (4.8 × 2.6 world units)
-const BOX_W = 480;
-const BOX_H = 260;
 const DRIFT_TOLERANCE = 2.5;
 /** catch-up beat — also the retry clock for a blocked autoplay */
 const RESYNC_MS = 4_000;
@@ -49,6 +56,8 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
     tvRef.current = tv;
     videoRef.current = videoId;
     fallbackRef.current = fallbackPlaylist;
+    // only a loaded player with a real video may be put on the wall
+    tvScreenAnchor.ready = readyRef.current && !!videoId;
   });
 
   // follow the room: swap video, then play / pause / seek to the room clock
@@ -59,20 +68,28 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
     const list = state.playlist.length ? state.playlist : fallbackRef.current;
     const item = list[state.index % Math.max(1, list.length)];
     const id = item?.id ?? "";
+    if (!id) return;
+    const target = Math.max(
+      0,
+      (state.positionSec ?? 0) + (state.playing ? (Date.now() - state.updatedAt) / 1000 : 0)
+    );
     try {
       player.mute();
-      if (id && id !== loadedRef.current) {
-        loadedRef.current = id;
-        player.loadVideoById(id);
-      }
-      if (!id) return;
-      const target = Math.max(0, (state.positionSec ?? 0) + (state.playing ? (Date.now() - state.updatedAt) / 1000 : 0));
+      const fresh = id !== loadedRef.current;
       if (state.playing) {
-        try {
+        // load straight to the room's frame — no jump from 0 to the seek
+        if (fresh) {
+          loadedRef.current = id;
+          player.loadVideoById(id, target);
+        } else {
           player.playVideo();
-        } catch {
-          /* autoplay needs one user gesture — plays on the next sync */
         }
+      } else if (fresh) {
+        // A paused room cues, it doesn't load-and-pause: loadVideoById starts
+        // playing, so pausing it in the same tick leaves a never-started,
+        // black player stuck on the wall. Cueing paints the real frame there.
+        loadedRef.current = id;
+        player.cueVideoById(id, target);
       } else {
         player.pauseVideo();
       }
@@ -91,8 +108,8 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
       .then((YT) => {
         if (dead || !mountRef.current) return;
         player = new YT.Player(mountRef.current, {
-          width: String(BOX_W),
-          height: String(BOX_H),
+          width: String(TV_OVERLAY_W),
+          height: String(TV_OVERLAY_H),
           playerVars: { rel: 0, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, playsinline: 1 },
           events: {
             onReady: (e) => {
@@ -102,6 +119,7 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
                 /* unmuted overlay would double the panel's audio — retry below */
               }
               readyRef.current = true;
+              tvScreenAnchor.ready = !!videoRef.current;
               syncPlayer();
             },
           },
@@ -114,6 +132,7 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
     return () => {
       dead = true;
       readyRef.current = false;
+      tvScreenAnchor.ready = false;
       try {
         player?.destroy();
       } catch {
@@ -124,6 +143,7 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
   }, []);
 
   useEffect(() => {
+    tvScreenAnchor.ready = readyRef.current && !!videoId;
     syncPlayer();
   }, [videoId, tv.index, tv.playing, tv.positionSec, tv.updatedAt, fallbackPlaylist]);
 
@@ -155,37 +175,22 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
     };
   }, []);
 
-  // pin the box onto the projected screen quad — direct DOM writes only
+  // hand the box to the scene, which pins it every frame (no rAF here — a
+  // loop of our own would paint the previous camera over the current frame)
   useEffect(() => {
-    let raf = 0;
-    let shown: boolean | null = null;
-    let lastMatrix = "";
-    const tick = () => {
-      raf = requestAnimationFrame(tick);
-      const el = wrapRef.current;
-      if (!el) return;
-      const show = tvScreenAnchor.visible && readyRef.current && !!videoRef.current;
-      if (show !== shown) {
-        shown = show;
-        el.style.display = show ? "block" : "none";
-      }
-      if (!show) return;
-      const m = quadToMatrix3d(tvScreenAnchor, BOX_W, BOX_H);
-      if (m !== lastMatrix) {
-        lastMatrix = m;
-        el.style.transform = m;
-      }
+    tvScreenAnchor.el = wrapRef.current;
+    return () => {
+      tvScreenAnchor.el = null;
+      tvScreenAnchor.ready = false;
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
   }, []);
 
   return (
     <div
       ref={wrapRef}
       aria-hidden="true"
-      className="pointer-events-none absolute left-0 top-0 z-[11] touch-none select-none"
-      style={{ width: BOX_W, height: BOX_H, transformOrigin: "0 0", display: "none" }}
+      className="pointer-events-none absolute left-0 top-0 z-0 touch-none select-none"
+      style={{ width: TV_OVERLAY_W, height: TV_OVERLAY_H, transformOrigin: "0 0", display: "none" }}
     >
       <div ref={mountRef} className="h-full w-full overflow-hidden bg-black [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:border-0" />
     </div>

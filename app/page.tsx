@@ -277,6 +277,12 @@ function HallClient({ me }: { me: Identity }) {
 
   return (
     <main className="relative h-dvh w-full touch-manipulation overflow-hidden bg-[#f6efe6] font-[var(--font-geist-sans),system-ui,sans-serif]">
+      {/* live picture on the 3D TV — kept UNDER the canvas on purpose: the
+          scene punches a depth-tested hole where the screen is the front-most
+          surface, so lamps, scoreboards and the next room's walls occlude the
+          picture like real geometry. Muted; the TV panel carries the sound. */}
+      <TvScreenOverlay tv={{ ...tv, playlist: tvPlaylist }} fallbackPlaylist={room.tv} />
+
       <HallScene
         myName={profile.name}
         myColor={profile.color}
@@ -308,9 +314,6 @@ function HallClient({ me }: { me: Identity }) {
 
       {/* soft vignette for coziness */}
       <div className="pointer-events-none absolute inset-0 z-10 bg-[radial-gradient(ellipse_at_center,transparent_58%,rgba(120,90,110,0.14)_100%)]" />
-
-      {/* live picture on the 3D TV (muted — the TV panel carries sound) */}
-      <TvScreenOverlay tv={{ ...tv, playlist: tvPlaylist }} fallbackPlaylist={room.tv} />
 
       <Hud
         roomName={room.name}

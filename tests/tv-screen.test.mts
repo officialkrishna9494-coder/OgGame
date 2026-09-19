@@ -92,9 +92,45 @@ ok("overlay: muted, click-through, read-only follower below the HUD", () => {
   assert.match(ov, /playVideo\(\)/, "plays with the room");
   assert.match(ov, /pauseVideo\(\)/, "pauses with the room");
   assert.match(ov, /seekTo/, "seeks to the room clock on drift");
-  assert.match(ov, /tvScreenAnchor\.visible/, "hides with the anchor");
-  assert.match(ov, /z-\[11\]/, "above the canvas, below the HUD");
-  assert.match(ov, /quadToMatrix3d\(tvScreenAnchor/, "pinned by the solved quad");
+  assert.match(ov, /cueVideoById/, "a paused room cues a real frame — never a black player");
+  assert.match(ov, /loadVideoById\(id, target\)/, "loads straight to the room's frame");
+  assert.match(ov, /z-0/, "a layer below the canvas");
+  assert.ok(!ov.includes("z-[11]"), "never lifted above the hall");
+  assert.match(ov, /tvScreenAnchor\.el = wrapRef\.current/, "hands its box to the render tick");
+  assert.match(ov, /tvScreenAnchor\.ready = /, "reports when it has a frame to show");
+  assert.ok(!ov.includes("requestAnimationFrame"), "no rAF of its own — the render tick paints it");
+  assert.ok(!ov.includes("style.transform"), "never moves itself");
+});
+
+ok("occlusion: the picture shows through a depth-tested hole, not over the hall", () => {
+  const scene = read("components/HallScene.tsx");
+  assert.match(scene, /new THREE\.WebGLRenderer\(\{[\s\S]{0,700}?alpha: true/, "canvas keeps an alpha channel to punch through");
+  assert.match(scene, /depthFunc: THREE\.EqualDepth/, "only the front-most surface is punched");
+  assert.match(scene, /blendSrc: THREE\.ZeroFactor,[\s\S]{0,80}blendDst: THREE\.ZeroFactor/, "the punch clears pixels, it doesn't tint them");
+  assert.match(scene, /tvHole\.position\.copy\(tvScreen\.position\)/, "hole sits exactly on the screen");
+  assert.match(scene, /tvHole\.visible = show && tvScreenAnchor\.ready/, "no hole without a picture to show through it");
+  assert.match(scene, /tvHole\.visible = false;/, "starts closed — the status card is the fallback");
+  const page = read("app/page.tsx");
+  const overlay = page.indexOf("<TvScreenOverlay");
+  const hall = page.indexOf("<HallScene");
+  assert.ok(overlay > 0 && overlay < hall, "mounted before the canvas, so it paints under it");
+});
+
+ok("paint: the DOM layer moves in the frame tick, from the same camera", () => {
+  const scene = read("components/HallScene.tsx");
+  const paint = scene.indexOf("paintTvScreen()");
+  const render = scene.indexOf("renderer.render(scene, camera)");
+  assert.ok(paint > 0, "the scene paints the overlay");
+  assert.ok(render > paint, "painted before the frame is drawn — never a frame behind");
+  // the camera matrix must be refreshed once per frame, right after aiming
+  assert.match(
+    scene,
+    /camera\.lookAt\(lookSm\);\n(?:\s*\/\/[^\n]*\n)*\s*camera\.updateMatrixWorld\(\);/,
+    "fresh camera matrix before projecting (render only refreshes it after)"
+  );
+  const lib = read("lib/tv-screen.ts");
+  assert.match(lib, /quadToMatrix3d\(tvScreenAnchor, TV_OVERLAY_W, TV_OVERLAY_H\)/, "the one solve the tick owns");
+  assert.match(lib, /tvScreenAnchor\.shown/, "hide/show only on change");
 });
 
 ok("overlay: heals its own playback (catch-up beat, gesture unlock, tab return)", () => {

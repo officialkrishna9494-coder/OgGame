@@ -2,10 +2,14 @@
 // YouTube pixels can't enter WebGL (cross-origin iframes taint canvas), so
 // the hall's TV shows real video through a DOM iframe pinned exactly over
 // the 3D screen instead: the render loop projects the screen's four corners
-// to CSS pixels here every frame, and TvScreenOverlay maps its player onto
-// that quad in its own rAF. No React re-renders — same handoff as the
+// to CSS pixels here every frame and paints its box in the SAME tick, right
+// before the frame is drawn. No React re-renders — same handoff as the
 // in-world prompt anchor. The canvas status card underneath stays the
 // fallback (no video / API blocked / facing away).
+//
+// One tick owns both, on purpose: a second rAF loop (or the wrong camera
+// matrix) leaves the DOM a frame behind the canvas, which reads as the
+// picture sliding across the TV whenever the camera moves.
 
 export interface TvQuad {
   x0: number;
@@ -18,9 +22,27 @@ export interface TvQuad {
   y3: number; // bottom-left
 }
 
-/** scene → overlay handoff: screen quad in CSS px, or hidden */
-export const tvScreenAnchor: { visible: boolean } & TvQuad = {
+/** overlay box — the same aspect as the 3D screen (4.8 × 2.6 world units) */
+export const TV_OVERLAY_W = 480;
+export const TV_OVERLAY_H = 260;
+
+/** scene → overlay handoff: screen quad in CSS px, the overlay's box, and
+ *  the gates both sides share. The render loop owns `visible` (per frame),
+ *  the overlay owns `ready` (its muted player can show a frame), and only
+ *  the render tick ever touches the element's style. */
+export const tvScreenAnchor: {
+  visible: boolean;
+  ready: boolean;
+  el: HTMLElement | null;
+  /** last painted state — the scene rewrites only on change */
+  shown: boolean;
+  matrix: string;
+} & TvQuad = {
   visible: false,
+  ready: false,
+  el: null,
+  shown: false,
+  matrix: "",
   x0: 0,
   y0: 0,
   x1: 0,
@@ -30,6 +52,28 @@ export const tvScreenAnchor: { visible: boolean } & TvQuad = {
   x3: 0,
   y3: 0,
 };
+
+/**
+ * Paint the overlay onto the projected quad — called by the scene's render
+ * loop in the tick that computes the corners and draws the frame, so the
+ * DOM layer and the canvas always show the same camera. Hides (and stays
+ * hidden) until the screen is in view and the overlay can actually show a
+ * frame; the canvas status card is the fallback underneath.
+ */
+export function paintTvScreen(): void {
+  const el = tvScreenAnchor.el;
+  if (!el) return;
+  const show = tvScreenAnchor.visible && tvScreenAnchor.ready;
+  if (show !== tvScreenAnchor.shown) {
+    tvScreenAnchor.shown = show;
+    el.style.display = show ? "block" : "none";
+  }
+  if (!show) return;
+  const m = quadToMatrix3d(tvScreenAnchor, TV_OVERLAY_W, TV_OVERLAY_H);
+  if (m === tvScreenAnchor.matrix) return;
+  tvScreenAnchor.matrix = m;
+  el.style.transform = m;
+}
 
 /**
  * CSS matrix3d mapping a w×h box (origin top-left) onto a screen quad.
