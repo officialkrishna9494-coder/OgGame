@@ -2137,8 +2137,14 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         lookSm.z += (pz + fz * ahead - lookSm.z) * k;
       } else if (chaseCam) {
         // close chase — hover just behind the back, nearer than max zoom-in
-        // ever reaches, full body in frame with the road ahead up top
-        desired.set(px - fx * 4.0, py + 2.7, pz - fz * 4.0);
+        // ever reaches, full body in frame with the road ahead up top.
+        // Clamped inside the room so the new front/left walls never swallow
+        // the lens (it slides along them instead, like a real camera rig).
+        desired.set(
+          Math.max(HALL.xMin + 0.6, Math.min(HALL.xMax - 0.6, px - fx * 4.0)),
+          py + 2.7,
+          Math.max(HALL.zMin + 0.6, Math.min(HALL.zMax - 0.6, pz - fz * 4.0))
+        );
         camera.position.lerp(desired, Math.min(1, dt * 6));
         const k = Math.min(1, dt * 6);
         lookSm.x += (px + fx * 6 - lookSm.x) * k;
@@ -2198,6 +2204,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         promptAnchor.key = null;
       }
 
+      // room finishes itself around an inside camera: front wall + ceiling
+      // appear in first-person / chase, hide in follow (open dollhouse)
+      env.setEnclosure(viewState.mode !== 0);
       renderer.render(scene, camera);
     };
 

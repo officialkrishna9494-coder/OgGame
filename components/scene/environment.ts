@@ -43,6 +43,8 @@ export interface Environment {
   /** repaint the court scoreboard (cheap; call on state change + once a second) */
   drawCourtBoard: (d: DodgeState, serverNow: number, onCourt: number) => void;
   setCourtMode: (mode: CourtMode) => void;
+  /** show the front wall + ceiling when the camera rides inside the room */
+  setEnclosure: (inside: boolean) => void;
   /** the fireplace + café lights, for the render loop's light budget */
   dispose: () => void;
 }
@@ -109,6 +111,96 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     for (let z = HALL.zMin + 0.75; z < HALL.zMax; z += 1.5) shell.add(mesh(battenR, trim, RIGHT_WALL_X - 0.07, 0.56, z));
     root.add(shell);
     freeze(shell);
+  }
+
+  // ─────────── full enclosure: front + left walls, ceiling, windows ─────────
+  // The dollhouse opens toward the camera, so these live apart from the shell:
+  // hidden in follow view (a front wall would block the camera, a ceiling
+  // would cap the dollhouse), shown in first-person / chase where the camera
+  // rides inside and every direction must read as finished. Cream, trims and
+  // battens continue the existing walls; physics needs nothing (bounds clamp
+  // players, carts and balls inside the inner faces already).
+  const enclosure = new THREE.Group(); // front wall + ceiling — view-gated
+  const H = HALL.wallHeight;
+  const B = BACK_WALL_Z;
+  const R = RIGHT_WALL_X;
+  const L = HALL.xMin;
+  const F = HALL.zMax;
+  let enclosureOn = false;
+  {
+    const wallMat = mat("#fbf5ea", 0.95);
+    const sideWallMat = mat("#f7eddc", 0.95);
+    const trim = mat("#fffaf2", 0.7);
+    const wood = mat("#c9a876", 0.75);
+    const wainscot = mat("#f0dfc6", 0.9);
+    const span = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, m: THREE.Material) =>
+      mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), m, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    // left wall is lateral to the follow camera (never blocks it), so it joins
+    // the always-visible shell look; butt joints touch at planes, never volumes
+    const left = new THREE.Group();
+    left.add(span(L - 0.4, L, 0, H, B, F + 0.4, sideWallMat));
+    // front wall (camera side) + ceiling hide with the dollhouse open
+    enclosure.add(span(L, R + 0.2, 0, H, F, F + 0.4, wallMat));
+    const trims: Array<{ depth: number; y0: number; y1: number; overhang: number; m: THREE.Material }> = [
+      { depth: 0.06, y0: 0, y1: 1.1, overhang: 0, m: wainscot },
+      { depth: 0.1, y0: 1.08, y1: 1.16, overhang: 0.02, m: trim },
+      { depth: 0.09, y0: 0, y1: 0.18, overhang: 0.01, m: wood },
+      { depth: 0.24, y0: H - 0.24, y1: H, overhang: 0.03, m: trim },
+    ];
+    for (const t of trims) {
+      left.add(span(L, L + t.depth, t.y0, t.y1, B + t.depth, F + 0.4 + t.overhang, t.m));
+      enclosure.add(span(L, R + t.overhang, t.y0, t.y1, F - t.depth, F, t.m));
+    }
+    const batten = new THREE.BoxGeometry(0.06, 0.9, 0.03);
+    for (let x = HALL.xMin + 0.75; x < HALL.xMax; x += 1.5) enclosure.add(mesh(batten, trim, x, 0.56, F - 0.07));
+    const battenL = new THREE.BoxGeometry(0.03, 0.9, 0.06);
+    for (let z = HALL.zMin + 0.75; z < HALL.zMax; z += 1.5) left.add(mesh(battenL, trim, L + 0.07, 0.56, z));
+    // ceiling slab at the wall tops + wood beams. It must NOT cast shadows or
+    // the sun stops being the room's key light the moment it appears.
+    const ceil = mesh(new THREE.BoxGeometry(W + 0.8, 0.3, D + 0.8), mat("#f3ecdd", 1), CX + 0.2, H + 0.15, CZ - 0.2);
+    ceil.castShadow = false;
+    ceil.receiveShadow = false;
+    enclosure.add(ceil);
+    for (let x = HALL.xMin + 4; x < HALL.xMax; x += 8) {
+      const beam = mesh(new THREE.BoxGeometry(0.28, 0.3, D), wood, x, H - 0.17, CZ);
+      beam.castShadow = false;
+      beam.receiveShadow = false;
+      enclosure.add(beam);
+    }
+    // windows: same dress as the back wall's (frame + daylight pane + sill +
+    // curtains), rotated to face the room — two on the front, one on the left
+    const winView = windowViewTexture();
+    disposables.push(winView);
+    const miniWindow = () => {
+      const g = new THREE.Group();
+      g.add(mesh(roundedBox(3.7, 2.7, 0.2, 0.06), mat("#ffffff", 0.6), 0, 0, 0));
+      const pane = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 2.3), new THREE.MeshBasicMaterial({ map: winView }));
+      pane.position.set(0, 0, 0.11);
+      g.add(pane);
+      const bar = mat("#ffffff", 0.6);
+      g.add(mesh(new THREE.BoxGeometry(0.08, 2.3, 0.05), bar, 0, 0, 0.14));
+      g.add(mesh(new THREE.BoxGeometry(3.3, 0.08, 0.05), bar, 0, 0, 0.145));
+      g.add(mesh(roundedBox(4.0, 0.12, 0.4, 0.04), mat("#fffaf2", 0.7), 0, -1.4, 0.15));
+      for (const side of [-1, 1]) {
+        const curtain = mesh(roundedBox(0.55, 3.1, 0.14, 0.07), mat("#ffd6e0", 0.95), side * 2.15, -0.05, 0.21);
+        curtain.scale.x = 0.9;
+        g.add(curtain);
+      }
+      return g;
+    };
+    for (const wx of [-8, 8]) {
+      const win = miniWindow();
+      win.position.set(wx, 6.8, F - 0.05);
+      win.rotation.y = Math.PI;
+      enclosure.add(win);
+    }
+    const winL = miniWindow();
+    winL.position.set(L + 0.05, 6.8, 6);
+    winL.rotation.y = Math.PI / 2;
+    left.add(winL);
+    root.add(left, enclosure);
+    freeze(left);
+    freeze(enclosure);
   }
 
   // ───────────────────────── windows + light beams ─────────────────────────
@@ -948,6 +1040,11 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     drawCourtBoard: drawBoard,
     setCourtMode: (mode) => {
       courtMode = mode;
+    },
+    setEnclosure: (inside) => {
+      if (inside === enclosureOn) return;
+      enclosureOn = inside;
+      enclosure.visible = inside;
     },
     dispose: () => {
       for (const d of disposables) d.dispose();
