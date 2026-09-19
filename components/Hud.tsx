@@ -64,6 +64,7 @@ interface Props {
   onToggleRps: () => void;
   onRpsAct: () => void;
   onToggleChat: () => void;
+  onToggleView: () => void;
   onSos: () => void;
   onOpenAddLink: () => void;
 }
@@ -269,6 +270,7 @@ export default function Hud(p: Props) {
             <LegendKey>W A S D</LegendKey> move
             <LegendKey>Space</LegendKey> hop
             <LegendKey>E</LegendKey> interact
+            <LegendKey>V</LegendKey> view
           </span>
         </div>
       </div>
@@ -397,6 +399,7 @@ function MobileHud(p: HudProps) {
       badge: p.unreadCount ? (p.unreadCount > 9 ? "9+" : String(p.unreadCount)) : undefined,
     },
     { key: "profile", icon: "user", label: "profile", run: p.onOpenProfile },
+    { key: "view", icon: "view", label: "view", run: p.onToggleView },
   ];
   // one glanceable signal on the closed ⋯ button
   const menuAlert = !!p.unreadCount || p.rpsStatus === "picking" || p.rpsStatus === "revealing";

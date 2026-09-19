@@ -27,6 +27,7 @@ import { DeviceRotate } from "@phosphor-icons/react/dist/csr/DeviceRotate";
 import { DiceFive } from "@phosphor-icons/react/dist/csr/DiceFive";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { Export } from "@phosphor-icons/react/dist/csr/Export";
+import { Eye } from "@phosphor-icons/react/dist/csr/Eye";
 import { FilmSlate } from "@phosphor-icons/react/dist/csr/FilmSlate";
 import { FloppyDisk } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { HandFist } from "@phosphor-icons/react/dist/csr/HandFist";
@@ -87,6 +88,7 @@ const ICONS = {
   toss: SoccerBall,
   dodge: Volleyball,
   drive: Car,
+  view: Eye,
   addLink: LinkSimple,
   duel: HandFist,
   starGame: Star,

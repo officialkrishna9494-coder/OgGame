@@ -16,6 +16,7 @@ import { buildCart, cartSeatOffset, disposeCart, poseCart, CART_RIDER_Y, type Ca
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
+import { toggleFpView, viewState } from "../lib/view-state";
 import { resetTurbo, turboState } from "../lib/turbo-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 
@@ -364,6 +365,8 @@ const CART_REV = -2.5;
 const CART_DRAG = 1.4;
 const CART_TURN = 2.1;
 const CART_RADIUS = 0.8;
+// first person — keyboard / stick turn rate (A/D turn the head, W/S throttle)
+const FP_TURN = 2.6;
 
 // turbo (spacebar while driving) — a 5 s tank of boost that refills in 10 s,
 // i.e. 0.5 s of boost banked per second. An early release therefore just tops
@@ -1011,6 +1014,13 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         return;
       }
       if (isTypingTarget(e) || (e.target as HTMLElement | null)?.closest('[role="dialog"]')) return;
+      // V — GTA-style view toggle: dollhouse follow ↔ first-person head-cam.
+      // Modifiers excluded so browser shortcuts and pasting never flip it.
+      if (k === "v" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleFpView();
+        return;
+      }
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k) || ["w", "a", "s", "d"].includes(k)) {
         e.preventDefault();
       }
@@ -1057,6 +1067,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     const ballPhys: BallState = { ...stateRef.current.ball };
     ejectBall(ballPhys);
     const hand = { x: 0, y: 0, z: 0 }; // scratch for carried-ball placement
+    const vmBall = new THREE.Vector3(); // scratch for the first-person held-ball spot
     const seatOff = { x: 0, z: 0 }; // scratch for the driver's seat offset
     let lastNetBall = JSON.stringify(ballPhys);
     let lastMoveSent = 0;
@@ -1152,6 +1163,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       const sitting = st.players[MY_ID]?.sitting ?? me.sitting;
       const sofaMode = sitting && st.players[MY_ID]?.seatMode === "sofa";
       let mySeat = st.players[MY_ID]?.seat ?? null;
+      const fpView = viewState.firstPerson;
 
       // ── turbo: SPACE while driving (the on-screen gauge doubles as the
       // boost button on touch, where there is no spacebar). The tank drains
@@ -1306,6 +1318,35 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           me.facing = lerpAngle(me.facing, seat.facing, k);
         }
         // floor-sit: stay exactly where you stand (no glide, no sink)
+      } else if (fpView) {
+        // first person on foot — A/D (or ←/→, or the stick sideways) turn the
+        // head, W/S (or ↑/↓, or the stick up/down) throttle along the nose.
+        // World-aligned strafing would fight the camera, so it stays home.
+        const ACCEL = 30;
+        const MAX = 4.4;
+        const turnIn =
+          (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0) + joy.x;
+        // minus: turning right (D) rotates the nose clockwise on screen,
+        // i.e. facing decreases — plus would mirror it
+        me.facing -= turnIn * FP_TURN * dt;
+        const thr =
+          (keys.has("w") || keys.has("arrowup") ? 1 : 0) - (keys.has("s") || keys.has("arrowdown") ? 1 : 0) - joy.y;
+        const fx = Math.sin(me.facing);
+        const fz = Math.cos(me.facing);
+        me.vx += fx * thr * ACCEL * dt;
+        me.vz += fz * thr * ACCEL * dt;
+        const fr = Math.exp(-9 * dt);
+        if (Math.abs(thr) < 0.05) {
+          me.vx *= fr;
+          me.vz *= fr;
+        }
+        const sp = Math.hypot(me.vx, me.vz);
+        if (sp > MAX) {
+          me.vx = (me.vx / sp) * MAX;
+          me.vz = (me.vz / sp) * MAX;
+        }
+        me.x += me.vx * dt;
+        me.z += me.vz * dt;
       } else {
         const ACCEL = 30;
         const MAX = 4.4;
@@ -1758,6 +1799,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           while (d < -Math.PI) d += Math.PI * 2;
           g.rotation.y += d * Math.min(1, dt * 10);
         }
+        // first person hides your own head and body (the camera rides inside
+        // it) — everyone else renders exactly as before
+        g.visible = id !== MY_ID || !viewState.firstPerson;
         const cartSpeed = driverSim ? Math.abs(driverSim.speed) : 0;
         const speed = driving ? cartSpeed : id === MY_ID ? Math.hypot(me.vx, me.vz) : p.moving ? 3 : 0;
         const walking = driving ? cartSpeed > 0.4 : id === MY_ID ? speed > 0.4 : p.moving;
@@ -1926,6 +1970,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       ballMesh.visible = st.dodge.status !== "playing";
 
       // ── dodgeballs ──
+      let fpDodgeMesh: THREE.Object3D | null = null; // my held ball, for the FP viewmodel below
       {
         const dg = st.dodge;
         for (const nb of dg.balls) {
@@ -1944,6 +1989,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             hand.z = sim.body.z;
           }
           sim.mesh.position.set(hand.x, hand.y, hand.z);
+          if (holder === MY_ID) fpDodgeMesh = sim.mesh;
           const spin = Math.hypot(sim.body.vx, sim.body.vz);
           sim.mesh.rotation.x += dt * (spin * 2.2 + 0.3);
           sim.mesh.rotation.y += dt * 0.6;
@@ -2062,14 +2108,61 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
 
       // ── camera follow: both the position AND the gaze point are damped,
       // so the frame glides instead of shaking ──
-      const tx = me.x * 0.72;
-      const tz = me.z * 0.7 + 2.4;
-      desired.set(tx, camDist * 0.64, tz + camDist * 0.6);
-      camera.position.lerp(desired, Math.min(1, dt * 4));
-      lookSm.x += (tx - lookSm.x) * Math.min(1, dt * 4);
-      lookSm.y += (1.0 - lookSm.y) * Math.min(1, dt * 4);
-      lookSm.z += (tz - 4 - lookSm.z) * Math.min(1, dt * 4);
+      const fpCam = viewState.firstPerson;
+      const drivingCam = fpCam && myCartId !== null;
+      if (fpCam) {
+        // first person — ride the head (the avatar's own group position, so
+        // the kart seat and the walk-bob come along) and gaze down the nose.
+        // In the kart the gaze tips down so the hood and nose fill the lower
+        // frame like a real cockpit; on foot it stays near level.
+        const myG = rigs.get(MY_ID)?.group.position;
+        const px = myG ? myG.x : me.x;
+        const py = myG ? myG.y : me.y;
+        const pz = myG ? myG.z : me.z;
+        const fx = Math.sin(me.facing);
+        const fz = Math.cos(me.facing);
+        desired.set(px + fx * 0.22, py + 1.55, pz + fz * 0.22);
+        camera.position.lerp(desired, Math.min(1, dt * 10));
+        const k = Math.min(1, dt * 10);
+        const ahead = drivingCam ? 7 : 8;
+        const drop = drivingCam ? 1.6 : 0.25;
+        lookSm.x += (px + fx * ahead - lookSm.x) * k;
+        lookSm.y += (py + 1.55 - drop - lookSm.y) * k;
+        lookSm.z += (pz + fz * ahead - lookSm.z) * k;
+      } else {
+        const tx = me.x * 0.72;
+        const tz = me.z * 0.7 + 2.4;
+        desired.set(tx, camDist * 0.64, tz + camDist * 0.6);
+        camera.position.lerp(desired, Math.min(1, dt * 4));
+        lookSm.x += (tx - lookSm.x) * Math.min(1, dt * 4);
+        lookSm.y += (1.0 - lookSm.y) * Math.min(1, dt * 4);
+        lookSm.z += (tz - 4 - lookSm.z) * Math.min(1, dt * 4);
+      }
       camera.lookAt(lookSm);
+      // lens to match the view: wider + a close near-plane in first person
+      // (the dash and the held ball live under a metre away), classic 44
+      // and deep precision back outside
+      const wantFov = !fpCam ? 44 : drivingCam ? 62 : 55;
+      const wantNear = fpCam ? 0.1 : 1;
+      if (Math.abs(camera.fov - wantFov) > 0.05 || camera.near !== wantNear) {
+        camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6);
+        if (Math.abs(camera.fov - wantFov) <= 0.05) camera.fov = wantFov;
+        camera.near = wantNear;
+        camera.updateProjectionMatrix();
+      }
+      // first-person viewmodel — a held ball rides bottom-right of the lens
+      // like a carried item. (The hands hide with the avatar, so the normal
+      // hand-spot ball would float oddly at the frame edge instead.)
+      if (fpCam) {
+        camera.updateMatrixWorld();
+        vmBall.set(0.45, -0.18, -1.0).applyMatrix4(camera.matrixWorld);
+        const iHoldLobby =
+          ballMesh.visible &&
+          st.ball.holderId !== null &&
+          (st.ball.holderId === st.mySocketId || st.ball.holderId === MY_ID);
+        if (iHoldLobby) ballMesh.position.copy(vmBall);
+        if (fpDodgeMesh) fpDodgeMesh.position.copy(vmBall);
+      }
 
       // ── in-world prompt: project the current action's anchor to screen ──
       const pk = actionKey(lastCtx, {
@@ -2123,7 +2216,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     window.addEventListener("resize", onResize);
 
     // ── zoom: mouse wheel, trackpad pinch and touch pinch share one range ──
+    // (third person only — the head-cam keeps its own framing)
     const setZoom = (d: number) => {
+      if (viewState.firstPerson) return;
       camDist = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, d));
     };
     const onWheel = (e: WheelEvent) => {

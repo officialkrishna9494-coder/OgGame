@@ -30,6 +30,7 @@ import { dbConfigured } from "../lib/db";
 import { popSfx, sosSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
 import { storeProfile } from "../lib/auth";
+import { toggleFpView } from "../lib/view-state";
 import { IDLE_CONTEXT, type BallState, type ContextState, type PlayerState } from "../lib/hall-types";
 import { stampRoom } from "../lib/room-store";
 
@@ -204,6 +205,8 @@ function HallClient({ me }: { me: Identity }) {
     setChatOpen((v) => !v);
     setChatSeenAt(Date.now());
   }, []);
+  // V key / view tile: dollhouse follow ↔ first-person head-cam
+  const handleToggleView = useCallback(() => toggleFpView(), []);
   // persist first (throws when offline/unsigned), bubble overhead on success
   const handleChatSend = useCallback(
     async (text: string) => {
@@ -321,6 +324,7 @@ function HallClient({ me }: { me: Identity }) {
         onToggleRps={() => setRpsOpen((v) => !v)}
         onRpsAct={handleRpsAct}
         onToggleChat={toggleChat}
+        onToggleView={handleToggleView}
         onSos={handleSos}
         onOpenAddLink={() => setLinkOpen(true)}
       />
