@@ -36,7 +36,7 @@ export default function TurboGauge() {
         shown = driving;
         el.style.visibility = driving ? "visible" : "hidden";
         el.style.opacity = driving ? "1" : "0";
-        el.style.transform = driving ? "translate(-50%, 0)" : "translate(-50%, -8px)";
+        el.style.transform = driving ? "translate(0, 0)" : "translate(0, 8px)";
       }
       if (!driving) return;
 
@@ -82,11 +82,13 @@ export default function TurboGauge() {
   return (
     <div
       ref={wrapRef}
-      // Centring lives in `transform` (set below) rather than Tailwind's
-      // -translate-x-1/2: in v4 that writes the CSS `translate` property, which
-      // would then stack with the JS transform and push the pill off-screen.
-      className="pointer-events-none absolute left-1/2 top-[calc(var(--safe-t)+3.7rem)] z-20"
-      style={{ visibility: "hidden", opacity: 0, transform: "translate(-50%, 0)" }}
+      // Bottom-right while driving: clear of the top bar + toasts, clear of
+      // the desktop dock (centered) and the mobile ACT cluster above it, and
+      // out of the joystick's lower-left zone. Slide-in lives in `transform`
+      // (set by the rAF loop) rather than Tailwind's translate property, which
+      // would stack with the JS transform in v4 and shove the pill off-screen.
+      className="pointer-events-none absolute bottom-[calc(var(--safe-b)+1rem)] right-[calc(var(--safe-r)+1rem)] z-20"
+      style={{ visibility: "hidden", opacity: 0, transform: "translate(0, 8px)" }}
     >
       <div
         ref={pillRef}
