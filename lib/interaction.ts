@@ -1,18 +1,20 @@
 // ─── Cozy Hall · the one contextual action (ACT button · E key · prompt) ────
 // Single source of truth shared by the HUD (what the button says and does)
 // and the 3D scene (where the in-world prompt floats), so the two can never
-// disagree. Priority: SOS → throw (lobby ball or dodgeball) → add video (TV)
-// → duel (RPS table) → star game (rug, idle) → dodgeball (court pad, idle)
-// → sofa sit / stand.
+// disagree. Priority: hop out (driving) → SOS → throw (lobby ball or
+// dodgeball) → hop in (free cart) → add video (TV) → duel (RPS table) → star
+// game (rug, idle) → dodgeball (court pad, idle) → sofa sit / stand.
 
 import type { IconName } from "../components/icons";
 import { COURT, LOUNGE, RPS_SPOT, SOS_SPOT, TV } from "./hall-layout";
 import type { ContextState } from "./hall-types";
 
-export type ActionKey = "sos" | "toss" | "addLink" | "duel" | "starGame" | "dodge" | "sit" | "stand";
+export type ActionKey = "sos" | "toss" | "drive" | "park" | "addLink" | "duel" | "starGame" | "dodge" | "sit" | "stand";
 
 export interface ActionFlags {
   sitting: boolean;
+  /** I am driving a cart — E / ACT always means "hop out" first */
+  driving: boolean;
   gameStatus?: string;
   rpsStatus?: string;
   /** my seat at the RPS table, if I'm a duelist */
@@ -39,8 +41,10 @@ export const HOLD_MS = 650;
 /** Allocation-free — the render loop calls this every frame. */
 export function actionKey(ctx: ContextState | undefined, f: ActionFlags): ActionKey | null {
   if (!ctx) return null;
+  if (f.driving) return "park";
   if (ctx.nearEmergency) return "sos";
   if (ctx.holdingBall || ctx.holdingDodge) return "toss";
+  if (ctx.nearCart) return "drive";
   if (ctx.nearTv) return "addLink";
   if (ctx.nearRps) return "duel";
   if (ctx.nearGame && f.gameStatus === "idle") return "starGame";
@@ -66,6 +70,10 @@ export function resolveAction(ctx: ContextState | undefined, f: ActionFlags): In
       return ctx?.holdingDodge
         ? { key, icon: "dodge", label: "throw", prompt: "Throw the dodgeball", glow: "#4cc9f0", hold: false }
         : { key, icon: "toss", label: "throw", prompt: "Throw the ball", glow: "#ff6b6b", hold: false };
+    case "drive":
+      return { key, icon: "drive", label: "hop in", prompt: "Hop in the cart", glow: "#4cc9f0", hold: false };
+    case "park":
+      return { key, icon: "drive", label: "hop out", prompt: "Hop out", glow: "#4cc9f0", hold: false };
     case "addLink":
       return { key, icon: "addLink", label: "add video", prompt: "Add a video to the TV", glow: "#ff8fab", hold: false };
     case "duel":
@@ -84,7 +92,7 @@ export function resolveAction(ctx: ContextState | undefined, f: ActionFlags): In
 }
 
 /** World point (x, y, z) the in-world prompt points at, per action. */
-export function actionAnchor(key: ActionKey, me: { x: number; y: number; z: number }, out: { x: number; y: number; z: number }) {
+export function actionAnchor(key: ActionKey, me: { x: number; y: number; z: number }, out: { x: number; y: number; z: number }, at?: { x: number; z: number }) {
   const sofaZ = LOUNGE.sofa.z;
   switch (key) {
     case "sos": // above the "SOS" tag on the pedestal
@@ -115,6 +123,12 @@ export function actionAnchor(key: ActionKey, me: { x: number; y: number; z: numb
       }
       break;
     case "stand": // seated: just above your name tag
+      out.x = me.x; out.y = me.y + 3.25; out.z = me.z;
+      break;
+    case "drive": // over the free cart (falls back to you if it moved on)
+      out.x = at?.x ?? me.x; out.y = 1.9; out.z = at?.z ?? me.z;
+      break;
+    case "park": // just above your name tag while driving
       out.x = me.x; out.y = me.y + 3.25; out.z = me.z;
       break;
   }

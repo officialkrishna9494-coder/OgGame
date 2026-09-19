@@ -31,6 +31,23 @@ const dodgeRef = require("./lib/dodge-referee");
 // resting spot clear of every furniture solid
 const BALL_SPAWN = layout.BALL_SPAWN;
 let ball = { x: BALL_SPAWN.x, z: BALL_SPAWN.z, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null };
+
+// ─── Hall carts (mini-game nº 4) — drivers simulate, server relays ────────
+// Two go-karts parked front-right. Only the current driver may move one;
+// everyone else renders the relayed state.
+let carts = layout.CART_SPAWNS.map((s) => ({
+  id: s.id,
+  x: s.x,
+  z: s.z,
+  facing: s.facing,
+  speed: 0,
+  driverId: null,
+  color: s.color,
+}));
+
+function cartDrivenBy(socketId) {
+  return carts.find((c) => c.driverId === socketId) ?? null;
+}
 let tv = { playlist: [], index: 0, playing: false, positionSec: 0, updatedAt: Date.now() };
 // watch-party drive cooldown (shared across all sockets — see hall:tv)
 let lastTvDriveAt = 0;
@@ -83,7 +100,7 @@ const dodge = dodgeRef.createDodge();
 
 function snapshot() {
   // `now` lets clients line their timers up with the server clock
-  return { players: Object.fromEntries(players), ball, tv, game, rps, sos, dodge, now: Date.now() };
+  return { players: Object.fromEntries(players), ball, tv, game, rps, sos, dodge, carts, now: Date.now() };
 }
 
 function refPlayers() {
@@ -286,6 +303,9 @@ app.prepare().then(() => {
     socket.on("hall:move", (p) => {
       const m = meta.get(socket.id);
       if (!m) return;
+      // cartId is only kept when this socket actually drives that cart
+      const claimed = typeof p.cartId === "string" ? p.cartId : null;
+      const cart = claimed ? carts.find((c) => c.id === claimed) : null;
       players.set(socket.id, {
         id: socket.id,
         name: m.name,
@@ -308,7 +328,42 @@ app.prepare().then(() => {
         chatAt: players.get(socket.id)?.chatAt,
         seat: typeof p.seat === "number" ? p.seat : null,
         seatMode: p.seatMode === "sofa" ? "sofa" : null,
+        cartId: cart && cart.driverId === socket.id ? cart.id : null,
       });
+      dirty = true;
+    });
+
+    // ─── hall carts ───────────────────────────────────────────────────────
+    socket.on("cart:enter", ({ cartId } = {}) => {
+      const cart = carts.find((c) => c.id === cartId);
+      const cur = players.get(socket.id);
+      if (!cart || !cur) return;
+      if (cart.driverId || cartDrivenBy(socket.id)) return; // taken / already driving
+      cart.driverId = socket.id;
+      cart.speed = 0;
+      players.set(socket.id, { ...cur, cartId: cart.id, sitting: false, seat: null, seatMode: null });
+      io.to("hall").emit("hall:toast", { text: `${cur.name} hopped in a cart!`, icon: "drive" });
+      dirty = true;
+    });
+
+    socket.on("cart:exit", () => {
+      const cart = cartDrivenBy(socket.id);
+      const cur = players.get(socket.id);
+      if (!cart || !cur) return;
+      cart.driverId = null;
+      cart.speed = 0;
+      players.set(socket.id, { ...cur, cartId: null });
+      dirty = true;
+    });
+
+    socket.on("cart:drive", (d = {}) => {
+      const cart = carts.find((c) => c.id === d.id);
+      if (!cart || cart.driverId !== socket.id) return; // only the driver moves it
+      const H = layout.HALL;
+      cart.x = Math.max(H.xMin + 0.8, Math.min(H.xMax - 0.8, Number(d.x) || 0));
+      cart.z = Math.max(H.zMin + 0.8, Math.min(H.zMax - 0.8, Number(d.z) || 0));
+      cart.facing = Number(d.facing) || 0;
+      cart.speed = Math.max(-3, Math.min(7, Number(d.speed) || 0));
       dirty = true;
     });
 
@@ -566,6 +621,12 @@ app.prepare().then(() => {
       const leaving = players.get(socket.id);
       players.delete(socket.id);
       meta.delete(socket.id);
+      // free any cart they were driving so it never wedges "taken"
+      const cart = cartDrivenBy(socket.id);
+      if (cart) {
+        cart.driverId = null;
+        cart.speed = 0;
+      }
       applyDodge(io, dodgeRef.leave(dodge, socket.id, leaving ? { x: leaving.x, z: leaving.z } : null, Date.now()));
       if (ball.holderId === socket.id) {
         // drop it from their hands where they stood — not back at the spot

@@ -9,7 +9,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { BALL_SPAWN } from "./room-defaults";
-import { CHAT_MAX_LEN, IDLE_DODGE, IDLE_GAME, IDLE_RPS, isOutfit, resolveHairstyle, type HairstyleId, type BallState, type DodgeState, type GameState, type OutfitId, type PlayerState, type RpsChoice, type RpsState, type SosState, type TvState } from "./hall-types";
+import { CART_SPAWNS } from "./hall-layout";
+import { CHAT_MAX_LEN, IDLE_DODGE, IDLE_GAME, IDLE_RPS, isOutfit, resolveHairstyle, type CartState, type HairstyleId, type BallState, type DodgeState, type GameState, type OutfitId, type PlayerState, type RpsChoice, type RpsState, type SosState, type TvState } from "./hall-types";
 
 export interface HallSnapshot {
   connected: boolean;
@@ -22,6 +23,7 @@ export interface HallSnapshot {
   rps: RpsState;
   sos: SosState | null;
   dodge: DodgeState;
+  carts: CartState[];
   /** add to Date.now() to read the server's clock (round timers, live throws) */
   serverOffset: number;
   toasts: Toast[];
@@ -69,7 +71,6 @@ const BOT_NAMES: Array<{ name: string; color: string; outfit: OutfitId }> = [
   { name: "Pudding", color: "#ffd6a5", outfit: "suit" },
   { name: "Boba", color: "#bdb2ff", outfit: "dress" },
 ];
-
 function botPlayer(i: number, t: number): PlayerState {
   const base = BOT_NAMES[i % BOT_NAMES.length];
   const a = t / 2600 + i * 2.1;
@@ -88,6 +89,11 @@ function botPlayer(i: number, t: number): PlayerState {
   };
 }
 
+/** parked carts for offline / bot mode (no drivers, no motion) */
+function idleCarts(): CartState[] {
+  return CART_SPAWNS.map((s) => ({ id: s.id, x: s.x, z: s.z, facing: s.facing, speed: 0, driverId: null, color: s.color }));
+}
+
 export function useHallSocket(me: JoinInfo | null) {
   const [snapshot, setSnapshot] = useState<HallSnapshot>({
     connected: false,
@@ -100,6 +106,7 @@ export function useHallSocket(me: JoinInfo | null) {
     rps: IDLE_RPS,
     sos: null,
     dodge: IDLE_DODGE,
+    carts: idleCarts(),
     serverOffset: 0,
     toasts: [],
   });
@@ -148,6 +155,7 @@ export function useHallSocket(me: JoinInfo | null) {
           players: { ...bots, ...(localRef.current ? { [localRef.current.id]: localRef.current } : {}) },
           ball: { ...ballRef.current },
           tv: { ...tvRef.current },
+          carts: idleCarts(),
         }));
       }, 100);
     };
@@ -172,7 +180,7 @@ export function useHallSocket(me: JoinInfo | null) {
       });
     });
     socket.on("connect_error", failToBots);
-    socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState; game?: GameState; rps?: RpsState; sos?: SosState | null; dodge?: DodgeState; now?: number }) => {
+    socket.on("hall:state", (state: { players: Record<string, PlayerState>; ball: BallState; tv: TvState; game?: GameState; rps?: RpsState; sos?: SosState | null; dodge?: DodgeState; carts?: CartState[]; now?: number }) => {
       // server clock offset, smoothed so one slow packet can't jolt timers
       if (typeof state.now === "number") {
         const sample = state.now - Date.now();
@@ -191,6 +199,7 @@ export function useHallSocket(me: JoinInfo | null) {
       const rps = state.rps ?? IDLE_RPS;
       const sos = state.sos ?? null;
       const dodge = state.dodge ?? IDLE_DODGE;
+      const carts = Array.isArray(state.carts) ? state.carts : idleCarts();
       const serverOffset = offsetRef.current ?? 0;
       setSnapshot((s) => ({
         ...s,
@@ -201,6 +210,7 @@ export function useHallSocket(me: JoinInfo | null) {
         rps,
         sos,
         dodge,
+        carts,
         serverOffset,
       }));
     });
@@ -273,6 +283,37 @@ export function useHallSocket(me: JoinInfo | null) {
         setSnapshot((s) => ({ ...s, players: { ...s.players, [next.id]: next } }));
       }
       emit("hall:profile", clean);
+    },
+    [emit]
+  );
+
+  // ── hall carts: hop in / out / drive ─────────────────────────────────────
+  // Enter + exit apply instantly locally (the 3D loop picks cartId up next
+  // frame) and the server confirms on the next snapshot.
+  const enterCart = useCallback(
+    (cartId: string) => {
+      if (localRef.current) {
+        const next = { ...localRef.current, cartId, sitting: false, seat: null, seatMode: null };
+        localRef.current = next;
+        setSnapshot((s) => ({ ...s, players: { ...s.players, [next.id]: next } }));
+      }
+      emit("cart:enter", { cartId });
+    },
+    [emit]
+  );
+
+  const exitCart = useCallback(() => {
+    if (localRef.current) {
+      const next = { ...localRef.current, cartId: null };
+      localRef.current = next;
+      setSnapshot((s) => ({ ...s, players: { ...s.players, [next.id]: next } }));
+    }
+    emit("cart:exit", {});
+  }, [emit]);
+
+  const driveCart = useCallback(
+    (c: { id: string; x: number; z: number; facing: number; speed: number }) => {
+      emit("cart:drive", c);
     },
     [emit]
   );
@@ -430,6 +471,9 @@ export function useHallSocket(me: JoinInfo | null) {
     sendMove,
     sendEmote,
     updateProfile,
+    enterCart,
+    exitCart,
+    driveCart,
     sendAction,
     tossBall,
     setBall,

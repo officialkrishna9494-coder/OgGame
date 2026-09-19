@@ -41,6 +41,8 @@ export interface OutfitPose {
   sitting: boolean;
   floorSit: boolean;
   jumping: boolean;
+  /** hands on the wheel, feet on the footrest — overrides limbs below */
+  driving: boolean;
   action: "poke" | "highfive" | "wave" | null;
   actionAt?: number;
   elapsed: number;
@@ -442,7 +444,7 @@ export function poseOutfit(rig: OutfitRig, dt: number, o: OutfitPose): void {
   }
 
   // jump tuck — knees up, arms out
-  if (o.jumping && !o.sitting) {
+  if (o.jumping && !o.sitting && !o.driving) {
     rig.legL.rotation.x += -0.35;
     rig.legR.rotation.x += 0.2;
     rig.kneeL.rotation.x += 0.8;
@@ -451,6 +453,31 @@ export function poseOutfit(rig: OutfitRig, dt: number, o: OutfitPose): void {
     rig.armR.rotation.x += -0.5;
     rig.armL.rotation.z = 0.7;
     rig.armR.rotation.z = -0.7;
+  }
+
+  // driving — thighs forward onto the footrest, hands forward to the wheel,
+  // torso upright with a slight forward lean. Overrides the stride above so
+  // the driver reads seated even at full speed.
+  if (o.driving) {
+    rig.legL.rotation.x = -1.08;
+    rig.legR.rotation.x = -1.08;
+    rig.kneeL.rotation.x = 1.5;
+    rig.kneeR.rotation.x = 1.5;
+    rig.armL.rotation.x = -0.95;
+    rig.armR.rotation.x = -0.95;
+    rig.armL.rotation.z = 0.22;
+    rig.armR.rotation.z = -0.22;
+    rig.elbowL.rotation.x = -0.4;
+    rig.elbowR.rotation.x = -0.4;
+    rig.torso.rotation.x = 0.14;
+    rig.torso.rotation.y = 0;
+    rig.hips.rotation.y = 0;
+    rig.hips.position.x = 0;
+    rig.head.rotation.x = 0.02;
+    if (rig.skirt) {
+      rig.skirt.rotation.x = -0.55;
+      rig.skirt.rotation.z = 0;
+    }
   }
 
   // gestures — high-five / wave raise the right hand, poke bows forward

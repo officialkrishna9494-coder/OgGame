@@ -52,6 +52,8 @@ interface Props {
   onSit: () => void;
   onSofaSit: () => void;
   onToss: () => void;
+  onDriveCart: () => void;
+  onParkCart: () => void;
   onToggleTv: () => void;
   /** star scramble starts from the rug (ACT / E) — it has no menu button */
   onStartGame: () => void;
@@ -80,6 +82,7 @@ export default function Hud(p: Props) {
   // the one contextual action — same resolver the 3D prompt uses
   const action = resolveAction(p.context, {
     sitting: p.sitting,
+    driving: !!p.players["me"]?.cartId,
     gameStatus: p.gameStatus,
     rpsStatus: p.rpsStatus,
     rpsSeat: p.rpsSeat,
@@ -88,6 +91,8 @@ export default function Hud(p: Props) {
   const run = (key: ActionKey) => {
     if (key === "sos") p.onSos();
     else if (key === "toss") p.onToss();
+    else if (key === "drive") p.onDriveCart();
+    else if (key === "park") p.onParkCart();
     else if (key === "addLink") p.onOpenAddLink();
     else if (key === "duel") p.onRpsAct();
     else if (key === "starGame") p.onStartGame();

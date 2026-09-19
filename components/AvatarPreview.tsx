@@ -119,7 +119,7 @@ export default function AvatarPreview({ outfit, color, hairstyle }: { outfit: Ou
       if (rig) {
         if (!reducedMotion.matches) {
           elapsed += dt;
-          poseOutfit(rig, dt, { elapsed, speed: 0, moving: false, sitting: false, floorSit: false, jumping: false, action: null, hitK: 0 });
+          poseOutfit(rig, dt, { elapsed, speed: 0, moving: false, sitting: false, floorSit: false, jumping: false, driving: false, action: null, hitK: 0 });
         }
         rig.group.rotation.y = rotation;
       }

@@ -12,6 +12,7 @@ import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { CaretUp } from "@phosphor-icons/react/dist/csr/CaretUp";
+import { Car } from "@phosphor-icons/react/dist/csr/Car";
 import { Chair } from "@phosphor-icons/react/dist/csr/Chair";
 import { ChatCircleDots } from "@phosphor-icons/react/dist/csr/ChatCircleDots";
 import { Check } from "@phosphor-icons/react/dist/csr/Check";
@@ -85,6 +86,7 @@ const ICONS = {
   sofa: Couch,
   toss: SoccerBall,
   dodge: Volleyball,
+  drive: Car,
   addLink: LinkSimple,
   duel: HandFist,
   starGame: Star,

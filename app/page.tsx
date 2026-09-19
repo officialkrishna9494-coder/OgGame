@@ -62,7 +62,7 @@ function HallClient({ me }: { me: Identity }) {
   const voice = useVoice(me);
 
   const socket = useHallSocket(profile);
-  const { players, ball, tv, game, rps, sos, dodge, serverOffset, toasts, simulated, mySocketId } = socket.snapshot;
+  const { players, ball, tv, game, rps, sos, dodge, carts, serverOffset, toasts, simulated, mySocketId } = socket.snapshot;
   // startsAt of the dodgeball round this player hid (0 = none hidden)
   const [dodgeHiddenRound, setDodgeHiddenRound] = useState(0);
   const chat = useChat();
@@ -159,6 +159,26 @@ function HallClient({ me }: { me: Identity }) {
     setNearName(name);
   }, []);
   const handleContext = useCallback((c: ContextState) => setContext(c), []);
+  // the hop-in cart id lives in the latest context (ACT/E only carries the key)
+  const contextRef = useRef(context);
+  useEffect(() => {
+    contextRef.current = context;
+  }, [context]);
+  // ACT / E by a free cart: hop in (server validates + toasts, socket echoes)
+  const handleDriveCart = useCallback(() => {
+    const cartId = contextRef.current.nearCart;
+    if (!cartId) return;
+    if (simulated) {
+      socket.pushToast("carts need the live hall server to sync — hop in anyway!", "drive");
+    }
+    socket.enterCart(cartId);
+    popSfx();
+  }, [socket, simulated]);
+  // ACT / E while driving: hop out beside the cart
+  const handleParkCart = useCallback(() => {
+    socket.exitCart();
+    popSfx();
+  }, [socket]);
   const handleCollect = useCallback((starId: string) => socket.collectStar(starId), [socket]);
   const handleHit = useCallback(() => socket.sendHit(), [socket]);
   const handleSofaSit = useCallback(() => socket.sendAction("sit", null, { seatMode: "sofa" }), [socket]);
@@ -245,6 +265,7 @@ function HallClient({ me }: { me: Identity }) {
         rps={rps}
         sos={sos}
         dodge={dodge}
+        carts={carts}
         serverOffset={serverOffset}
         onMove={handleMove}
         onBall={handleBall}
@@ -252,6 +273,7 @@ function HallClient({ me }: { me: Identity }) {
         onContext={handleContext}
         onCollect={handleCollect}
         onHit={handleHit}
+        onCartDrive={(c) => socket.driveCart(c)}
         onDodgePickup={socket.pickupDodge}
         onDodgeThrow={socket.throwDodge}
         onDodgeSpend={socket.spendDodge}
@@ -290,6 +312,8 @@ function HallClient({ me }: { me: Identity }) {
         onSit={() => socket.sendAction("sit")}
         onSofaSit={handleSofaSit}
         onToss={() => hallToss.fn?.()}
+        onDriveCart={handleDriveCart}
+        onParkCart={handleParkCart}
         onToggleTv={() => setTvOpen((v) => !v)}
         onStartGame={handleStartGame}
         onStartDodge={handleStartDodge}

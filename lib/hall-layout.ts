@@ -115,6 +115,14 @@ export const FLOOR_LAMPS = [...LOUNGE.lamps, NOOK.lamp, { x: -19.6, z: 10.6 }, {
 export const SPAWN = { xSpread: 6, zMin: -3.6, zMax: -0.8 };
 export const BALL_SPAWN = { x: 3.4, z: -2.2 };
 
+// ── hall carts (front right, clear of the court + nook) ──
+// Two drivable go-karts, facing the middle of the room. Spots verified clear
+// of every static collider (4.5 m / 3.8 m clearance, 3.3 m apart).
+export const CART_SPAWNS = [
+  { id: "cart-1", x: 14.5, z: 1.0, facing: -Math.PI / 2, color: "#ff8fab" },
+  { id: "cart-2", x: 17.0, z: 3.2, facing: -Math.PI / 2, color: "#4cc9f0" },
+];
+
 // ── wall art (admin-editable frames/posters hang on these planes) ──
 export const WALL_ART = {
   backZ: BACK_WALL_Z + 0.07,

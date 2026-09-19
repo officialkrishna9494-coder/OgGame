@@ -16,6 +16,8 @@ export interface PlayerState {
   /** outfit variant — "suit" (gentleman) or "dress" (lady); color tints it */
   outfit: OutfitId;
   hairstyle?: HairstyleId;
+  /** driving a hall cart — the avatar is posed in the seat, WASD steers */
+  cartId?: string | null;
   x: number;
   z: number;
   facing: number; // radians, 0 = facing camera (+z)
@@ -181,6 +183,27 @@ export interface ContextState {
   nearDodgePad: boolean;
   /** carrying a dodgeball during a round */
   holdingDodge: boolean;
+  /** id of a free hall cart in hop-in range (null when none) */
+  nearCart: string | null;
+  /** I am driving a cart — E / ACT means "hop out" */
+  driving: boolean;
+}
+
+// ─── Hall carts (mini-game nº 4 — two drivable go-karts) ────────────────────
+// Parked on the right side of the hall. Hop in with E / ACT, steer with the
+// same keys as walking (or the joystick on mobile), hop out the same way.
+// The driver's client simulates its own cart; the server relays + validates.
+export interface CartState {
+  id: string;
+  x: number;
+  z: number;
+  /** radians, same convention as players (0 = facing camera / +z) */
+  facing: number;
+  /** signed speed m/s (reverse is slower) — spins the wheels remotely */
+  speed: number;
+  /** socket id of the driver, null when parked */
+  driverId: string | null;
+  color: string;
 }
 
 export const IDLE_CONTEXT: ContextState = {
@@ -193,6 +216,8 @@ export const IDLE_CONTEXT: ContextState = {
   nearEmergency: false,
   nearDodgePad: false,
   holdingDodge: false,
+  nearCart: null,
+  driving: false,
 };
 
 // ─── Star Scramble (mini-game nº 1 — intentionally tiny) ────────────────────

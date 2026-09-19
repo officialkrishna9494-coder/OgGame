@@ -6,12 +6,13 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { BallState, ContextState, DodgeState, GameState, HairstyleId, OutfitId, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
+import type { BallState, CartState, ContextState, DodgeState, GameState, HairstyleId, OutfitId, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
 import { DODGE_LIVE_MS, DODGE_SHIELD_MS, IDLE_CONTEXT, resolveHairstyle } from "../lib/hall-types";
 import { ejectBall, handPoint, PICKUP_RADIUS, reachField, stepBall, TOUCH_FLOOR, TOUCH_SOLID, TOUCH_WALL } from "../lib/ball-physics";
 import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, inCourt } from "../lib/hall-layout";
 import { buildEnvironment, type CourtMode } from "./scene/environment";
 import { buildOutfit, disposeOutfit, OUTFIT_LABEL_Y, poseOutfit, setHairstyle, tintOutfit, type OutfitRig } from "./scene/outfits";
+import { buildCart, disposeCart, poseCart, CART_RIDER_Y, type CartRig } from "./scene/carts";
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
@@ -40,6 +41,7 @@ interface Props {
   rps: RpsState;
   sos: SosState | null;
   dodge: DodgeState;
+  carts: CartState[];
   serverOffset: number;
   onMove: (p: PlayerState) => void;
   onBall: (b: BallState) => void;
@@ -47,6 +49,7 @@ interface Props {
   onContext: (c: ContextState) => void;
   onCollect: (starId: string) => void;
   onHit: () => void;
+  onCartDrive: (c: { id: string; x: number; z: number; facing: number; speed: number }) => void;
   onDodgePickup: (ballId: string) => void;
   onDodgeThrow: (ballId: string, b: DodgeThrow) => void;
   onDodgeSpend: (ballId: string, rev: number) => void;
@@ -352,15 +355,24 @@ const STEP_KNEE = 0.28;
 // solid no matter how high you hop, so the layout keeps its meaning
 const VAULT_MAX = 1.0;
 
-export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySocketId, players, ball, room, tv, game, rps, sos, dodge, serverOffset, onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit }: Props) {
+// hall carts — arcade handling: brisk accel, grippy steering that bites more
+// the faster you roll, gentle drag so lifts coast to a stop
+const CART_ACCEL = 9;
+const CART_MAX = 6.5;
+const CART_REV = -2.5;
+const CART_DRAG = 1.4;
+const CART_TURN = 2.1;
+const CART_RADIUS = 0.8;
+
+export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySocketId, players, ball, room, tv, game, rps, sos, dodge, carts, serverOffset, onMove, onBall, onNear, onContext, onCollect, onHit, onCartDrive, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ players, ball, room, tv, game, rps, sos, dodge, serverOffset, myName, myColor, myOutfit, myHairstyle, mySocketId });
-  const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit });
+  const stateRef = useRef({ players, ball, room, tv, game, rps, sos, dodge, carts, serverOffset, myName, myColor, myOutfit, myHairstyle, mySocketId });
+  const cbRef = useRef({ onMove, onBall, onNear, onContext, onCollect, onHit, onCartDrive, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit });
 
   // keep the long-lived Three.js loop fed with fresh props without re-creating it
   useEffect(() => {
-    stateRef.current = { players, ball, room, tv, game, rps, sos, dodge, serverOffset, myName, myColor, myOutfit, myHairstyle, mySocketId };
-    cbRef.current = { onMove, onBall, onNear, onContext, onCollect, onHit, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit };
+    stateRef.current = { players, ball, room, tv, game, rps, sos, dodge, carts, serverOffset, myName, myColor, myOutfit, myHairstyle, mySocketId };
+    cbRef.current = { onMove, onBall, onNear, onContext, onCollect, onHit, onCartDrive, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit };
   });
 
   useEffect(() => {
@@ -908,6 +920,17 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     // ── avatars ──
     const rigs = new Map<string, AvatarRig>();
     const starMeshes = new Map<string, { group: THREE.Group; phase: number }>();
+    // one mesh per hall cart, keyed by cart id (colors follow the snapshot)
+    const cartRigs = new Map<string, CartRig>();
+    const getCartRig = (id: string, color: string) => {
+      let r = cartRigs.get(id);
+      if (!r) {
+        r = buildCart(color);
+        cartRigs.set(id, r);
+        scene.add(r.group);
+      }
+      return r;
+    };
     const getRig = (id: string, p: PlayerState) => {
       let r = rigs.get(id);
       // older servers / cached snapshots may not send an outfit yet
@@ -952,6 +975,14 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       sitting: false,
       grounded: true,
     };
+    // ── hall carts: which one I drive + display sim for every cart ─────────
+    // The driver's client owns its cart (server relays + validates); parked
+    // carts and rivals' carts ease toward the relayed snapshot every frame.
+    let myCartId: string | null = null;
+    const cartSim = new Map<string, { x: number; z: number; facing: number; speed: number; steer: number }>();
+    let lastNearCart: string | null = null;
+    let lastCartDriveSent = 0;
+    let enterTween: { x: number; z: number; at: number } | null = null;
     const keys = new Set<string>();
     // typing in chat / admin inputs must never steer the character.
     // keyup always releases (no stuck keys); keydown is ignored while typing.
@@ -971,11 +1002,12 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       }
       keys.add(k);
       if (k === " ") {
-        if (me.grounded && !me.sitting) me.vy = JUMP_VY;
+        if (!myCartId && me.grounded && !me.sitting) me.vy = JUMP_VY;
       }
     };
     const doJump = () => {
-      if (me.grounded && !me.sitting) me.vy = JUMP_VY;
+      if (myCartId || !me.grounded || me.sitting) return;
+      me.vy = JUMP_VY;
     };
     hallJump.fn = doJump;
     const kd = onKey(true);
@@ -1039,6 +1071,46 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
 
     const step = (dt: number) => {
       const st = stateRef.current;
+      // ── cart seat sync: the snapshot player (instant local echo on hop in /
+      // out, server truth a beat later) decides whether I drive right now ──
+      const serverCartId = st.players[MY_ID]?.cartId ?? null;
+      if (serverCartId && !myCartId) {
+        myCartId = serverCartId;
+        const s = st.carts.find((c) => c.id === myCartId);
+        cartSim.set(myCartId, {
+          x: s?.x ?? me.x,
+          z: s?.z ?? me.z,
+          facing: s?.facing ?? me.facing,
+          speed: 0,
+          steer: 0,
+        });
+        // glide the hips into the seat instead of snapping across the gap
+        enterTween = { x: me.x, z: me.z, at: performance.now() };
+      } else if (!serverCartId && myCartId) {
+        // stepped out beside the seat
+        const sim = cartSim.get(myCartId);
+        if (sim) {
+          me.x = sim.x - Math.cos(sim.facing) * 1.5;
+          me.z = sim.z + Math.sin(sim.facing) * 1.5;
+        }
+        me.y = 0;
+        me.vy = 0;
+        myCartId = null;
+      }
+      // lost the race for a cart someone else just took — step back out
+      if (myCartId && st.mySocketId) {
+        const srv = st.carts.find((c) => c.id === myCartId);
+        if (srv && srv.driverId && srv.driverId !== st.mySocketId) {
+          myCartId = null;
+          me.y = 0;
+          me.vy = 0;
+        }
+      }
+      // every cart gets a display sim (the driven one stays authoritative)
+      for (const c of st.carts) {
+        if (c.id === myCartId || cartSim.has(c.id)) continue;
+        cartSim.set(c.id, { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0 });
+      }
       // ── input dir (camera looks -z, so screen-up = -z) ──
       let ix = 0;
       let iz = 0;
@@ -1050,6 +1122,12 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         ix += joy.x;
         iz += joy.y;
       }
+      // Driving reads its own axes from the RAW input, before the walk vector
+      // is normalised — otherwise holding W+D gave 0.71 throttle and 0.71
+      // lock at once, so a turn always bled speed. WASD and the arrow keys
+      // are interchangeable: both feed ix / iz identically below.
+      const driveThrottle = Math.max(-1, Math.min(1, -iz));
+      const driveSteer = Math.max(-1, Math.min(1, ix));
       const len = Math.hypot(ix, iz);
       if (len > 1) {
         ix /= len;
@@ -1059,7 +1137,118 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       const sofaMode = sitting && st.players[MY_ID]?.seatMode === "sofa";
       let mySeat = st.players[MY_ID]?.seat ?? null;
 
-      if (sitting) {
+      // driving — the same sticks steer the cart instead of the feet
+      // (screen-up = forward), so the mobile joystick drives with no new UI
+      if (myCartId) {
+        let sim = cartSim.get(myCartId);
+        if (!sim) {
+          const s = st.carts.find((c) => c.id === myCartId);
+          sim = { x: s?.x ?? me.x, z: s?.z ?? me.z, facing: s?.facing ?? me.facing, speed: 0, steer: 0 };
+          cartSim.set(myCartId, sim);
+        }
+        sim.speed += driveThrottle * CART_ACCEL * dt;
+        // drag applied exactly once per frame (exponential → frame-rate-proof;
+        // the old `speed -= speed*DRAG*dt` plus collider scrubs fought it)
+        sim.speed *= Math.exp(-CART_DRAG * dt);
+        if (Math.abs(driveThrottle) < 0.05 && Math.abs(sim.speed) < 0.35) sim.speed = 0;
+        sim.speed = Math.max(CART_REV, Math.min(CART_MAX, sim.speed));
+        // The wheel bites harder the faster you roll, but never goes fully
+        // dead: the old /2.5 ramp gave ZERO authority below ~0.55 m/s, so a
+        // kart nudged into furniture couldn't turn its way free. A small floor
+        // keeps it manoeuvrable at a crawl (and lets it pivot when boxed in).
+        const grip = 0.22 + 0.78 * Math.min(1, Math.abs(sim.speed) / 2.5);
+        // Car-relative steering, the way a kart actually steers: A/← holds the
+        // wheel left, D/→ holds it right, and the yaw mirrors in reverse like
+        // every real car. The old `facing +=` spun the nose the WRONG way —
+        // press D and the kart curved to the driver's left — so the wheel now
+        // rotates the nose toward the driver's right, no matter which way the
+        // (fixed) camera happens to be looking.
+        sim.steer += (driveSteer - sim.steer) * Math.min(1, dt * 7);
+        const dir = sim.speed < -0.2 ? -1 : 1;
+        sim.facing -= sim.steer * CART_TURN * grip * dir * dt;
+        let nx = sim.x + Math.sin(sim.facing) * sim.speed * dt;
+        let nz = sim.z + Math.cos(sim.facing) * sim.speed * dt;
+        // anything solid — bump, never clip through. Speed is scrubed ONCE
+        // per frame below (the old per-collider ×0.55 was a dead stick:
+        // three overlapping colliders multiplied to ×0.17 every frame).
+        let bumped = false;
+        for (const c of COLLIDERS) {
+          const cx = Math.max(c.x - c.hx, Math.min(nx, c.x + c.hx));
+          const cz = Math.max(c.z - c.hz, Math.min(nz, c.z + c.hz));
+          const dx = nx - cx;
+          const dz = nz - cz;
+          if (dx * dx + dz * dz < CART_RADIUS * CART_RADIUS) {
+            const d = Math.hypot(dx, dz);
+            if (d > 1e-6) {
+              nx = cx + (dx / d) * CART_RADIUS;
+              nz = cz + (dz / d) * CART_RADIUS;
+            } else {
+              nx = sim.x;
+              nz = sim.z;
+            }
+            bumped = true;
+          }
+        }
+        // the other cart is solid too
+        for (const [id, other] of cartSim) {
+          if (id === myCartId) continue;
+          const dx = nx - other.x;
+          const dz = nz - other.z;
+          const d = Math.hypot(dx, dz);
+          if (d < CART_RADIUS * 2 && d > 1e-4) {
+            nx = other.x + (dx / d) * CART_RADIUS * 2;
+            nz = other.z + (dz / d) * CART_RADIUS * 2;
+            bumped = true;
+          }
+        }
+        // friends are soft — the cart shoves aside instead of mowing them down
+        for (const [id, p] of Object.entries(st.players)) {
+          if (id === MY_ID) continue;
+          const dx = nx - p.x;
+          const dz = nz - p.z;
+          const d = Math.hypot(dx, dz);
+          if (d < CART_RADIUS + 0.45 && d > 1e-4) {
+            nx = p.x + (dx / d) * (CART_RADIUS + 0.45);
+            nz = p.z + (dz / d) * (CART_RADIUS + 0.45);
+            bumped = true;
+          }
+        }
+        // walls
+        if (nx < HALL.xMin + 0.9 || nx > HALL.xMax - 0.9) {
+          nx = Math.max(HALL.xMin + 0.9, Math.min(HALL.xMax - 0.9, nx));
+          bumped = true;
+        }
+        if (nz < HALL.zMin + 0.9 || nz > HALL.zMax - 0.9) {
+          nz = Math.max(HALL.zMin + 0.9, Math.min(HALL.zMax - 0.9, nz));
+          bumped = true;
+        }
+        // one frame-rate-proof scrub per frame — a graze bleeds momentum,
+        // but the throttle always stays alive
+        if (bumped) sim.speed *= Math.exp(-6 * dt);
+        sim.x = nx;
+        sim.z = nz;
+        // the rider glides with the seat — no walk, no gravity, no jump
+        me.x = sim.x;
+        me.z = sim.z;
+        me.y = CART_RIDER_Y;
+        me.vx = 0;
+        me.vz = 0;
+        me.vy = 0;
+        me.facing = sim.facing;
+        me.grounded = true;
+        // relay to the hall ~12Hz so every screen rolls the same cart
+        const driveNow = performance.now();
+        if (driveNow - lastCartDriveSent > 80) {
+          lastCartDriveSent = driveNow;
+          cbRef.current.onCartDrive({
+            id: myCartId,
+            x: Math.round(sim.x * 100) / 100,
+            z: Math.round(sim.z * 100) / 100,
+            facing: Math.round(sim.facing * 100) / 100,
+            speed: Math.round(sim.speed * 100) / 100,
+          });
+        }
+      } else if (sitting) {
         me.vx = me.vz = 0;
         if (sofaMode) {
           // perch ON the nearest sofa seat (front edge of the cushions)
@@ -1103,9 +1292,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         if (sp > 0.4) me.facing = Math.atan2(me.vx, me.vz);
       }
 
-      // gravity + vaulting — skipped while sitting so gravity never fights
-      // the seat glide (that fight was the perched "jumping" jitter)
-      if (!sitting) {
+      // gravity + vaulting — skipped while sitting (seat glide) or driving
+      // (the rider glides with the seat), so gravity never fights either
+      if (!sitting && !myCartId) {
         // low furniture never blocks once the feet are above its top: a
         // running jump carries over coffee tables, stools, cushions and the
         // bleachers instead of sticking to them mid-air
@@ -1148,6 +1337,18 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           if (d < 0.75 && d > 1e-4) {
             me.x = p.x + (dx / d) * 0.75;
             me.z = p.z + (dz / d) * 0.75;
+          }
+        }
+        // carts are solid to walkers (drivers never run this branch, so the
+        // seat never shoves its own rider out)
+        for (const [, cs] of cartSim) {
+          const dx = me.x - cs.x;
+          const dz = me.z - cs.z;
+          const d = Math.hypot(dx, dz);
+          const minD = 0.38 + CART_RADIUS;
+          if (d < minD && d > 1e-4) {
+            me.x = cs.x + (dx / d) * minD;
+            me.z = cs.z + (dz / d) * minD;
           }
         }
       } else {
@@ -1334,7 +1535,8 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
 
       // ── broadcast move ~15Hz ──
       const now = performance.now();
-      const moving = Math.hypot(me.vx, me.vz) > 0.35;
+      const cartSpeed = myCartId ? Math.abs(cartSim.get(myCartId)?.speed ?? 0) : 0;
+      const moving = myCartId ? cartSpeed > 0.4 : Math.hypot(me.vx, me.vz) > 0.35;
       if (now - lastMoveSent > 66 || moving !== (lastMoveFlag === "m")) {
         lastMoveSent = now;
         lastMoveFlag = moving ? "m" : "s";
@@ -1365,9 +1567,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           facing: me.facing,
           moving,
           sitting,
-          seat: mySeat,
-          seatMode: sofaMode ? "sofa" : null,
-          jumping: me.y > 0.02,
+          seat: myCartId ? null : mySeat,
+          seatMode: myCartId || !sofaMode ? null : "sofa",
+          cartId: myCartId,
+          jumping: !myCartId && me.y > 0.02,
           ...freshEmote,
           ...freshAction,
           ...freshHit,
@@ -1415,6 +1618,22 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       const holdingDodge =
         st.dodge.status === "playing" &&
         (st.dodge.balls.some((b) => b.holderId === myId && performance.now() >= (dodgeSims.get(b.id)?.localUntil ?? 0)) || myDodgeBall !== null);
+      // free carts in hop-in range (hysteresis like every other zone); never
+      // while driving — E already means "hop out" then
+      let nearCart: string | null = null;
+      if (!myCartId) {
+        let best = lastNearCart && st.carts.some((c) => c.id === lastNearCart && !c.driverId) ? 2.8 : 2.2;
+        for (const c of st.carts) {
+          if (c.driverId) continue;
+          const d = Math.hypot(me.x - c.x, me.z - c.z);
+          const lim = c.id === lastNearCart ? 2.8 : 2.2;
+          if (d < lim && d < best) {
+            best = d;
+            nearCart = c.id;
+          }
+        }
+      }
+      lastNearCart = nearCart;
       const ctx: ContextState = {
         nearSofa,
         nearBall,
@@ -1425,11 +1644,14 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         nearEmergency,
         nearDodgePad,
         holdingDodge,
+        nearCart,
+        driving: myCartId !== null,
       };
       lastCtx = ctx;
-      const ctxSig = [ctx.nearSofa, ctx.nearBall, ctx.holdingBall, ctx.nearTv, ctx.nearGame, ctx.nearRps, ctx.nearEmergency, ctx.nearDodgePad, ctx.holdingDodge]
-        .map((v) => (v ? 1 : 0))
-        .join("");
+      const ctxSig =
+        [ctx.nearSofa, ctx.nearBall, ctx.holdingBall, ctx.nearTv, ctx.nearGame, ctx.nearRps, ctx.nearEmergency, ctx.nearDodgePad, ctx.holdingDodge, ctx.driving]
+          .map((v) => (v ? 1 : 0))
+          .join("") + "|" + (ctx.nearCart ?? "");
       if (ctxSig !== lastCtxSig) {
         lastCtxSig = ctxSig;
         cbRef.current.onContext(ctx);
@@ -1469,7 +1691,22 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         seen.add(id);
         const rig = getRig(id, p);
         const g = rig.group;
-        if (id === MY_ID) {
+        // drivers ride their cart's seat — pos/rotation come from the cart
+        // sim, never from the walk lerp, so rider and kart stay glued
+        const driverCartId = id === MY_ID ? myCartId : (p.cartId ?? null);
+        const driverSim = driverCartId ? cartSim.get(driverCartId) : undefined;
+        const driving = !!driverCartId && !!driverSim;
+        if (driving && driverSim) {
+          g.position.set(driverSim.x, CART_RIDER_Y, driverSim.z);
+          g.rotation.y = driverSim.facing;
+          // fresh hop-in: glide the hips from the door into the seat
+          if (id === MY_ID && enterTween && performance.now() - enterTween.at < 350) {
+            const k = (performance.now() - enterTween.at) / 350;
+            const e = k * k * (3 - 2 * k);
+            g.position.x += (enterTween.x - driverSim.x) * (1 - e);
+            g.position.z += (enterTween.z - driverSim.z) * (1 - e);
+          }
+        } else if (id === MY_ID) {
           g.position.set(me.x, me.y, me.z);
           g.rotation.y = me.facing;
         } else {
@@ -1481,9 +1718,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           while (d < -Math.PI) d += Math.PI * 2;
           g.rotation.y += d * Math.min(1, dt * 10);
         }
-        const speed = id === MY_ID ? Math.hypot(me.vx, me.vz) : p.moving ? 3 : 0;
-        const walking = id === MY_ID ? speed > 0.4 : p.moving;
-        const jumping = !p.sitting && (p.jumping || (id === MY_ID && me.y > 0.02));
+        const cartSpeed = driverSim ? Math.abs(driverSim.speed) : 0;
+        const speed = driving ? cartSpeed : id === MY_ID ? Math.hypot(me.vx, me.vz) : p.moving ? 3 : 0;
+        const walking = driving ? cartSpeed > 0.4 : id === MY_ID ? speed > 0.4 : p.moving;
+        const jumping = !driving && !p.sitting && (p.jumping || (id === MY_ID && me.y > 0.02));
         // bonk freshness 1 → 0 — drives the cloth flash + wobble inside the
         // pose engine (self reads the local stamp, friends the server echo)
         const selfStamp = id === MY_ID ? selfHitAt : 0;
@@ -1491,7 +1729,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         const hitK = hitStamp !== 0 && Date.now() - hitStamp < 2000 ? 1 - (Date.now() - hitStamp) / 2000 : 0;
         // perched sitters stand on the cushion edge (feet dangle); floor
         // sitters sink into a deep kneel (see poseOutfit)
-        const baseY = p.sitting ? (p.seat != null ? (SOFA_SEATS[p.seat]?.y ?? 0.55) - 0.635 : -0.38) : id === MY_ID ? me.y : 0;
+        const baseY = driving ? CART_RIDER_Y : p.sitting ? (p.seat != null ? (SOFA_SEATS[p.seat]?.y ?? 0.55) - 0.635 : -0.38) : id === MY_ID ? me.y : 0;
         g.position.y = baseY;
         poseOutfit(rig.outfit, dt, {
           speed,
@@ -1499,6 +1737,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           sitting: p.sitting,
           floorSit: p.sitting && p.seat == null,
           jumping,
+          driving,
           action: p.action ?? null,
           actionAt: p.actionAt,
           elapsed,
@@ -1506,7 +1745,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         });
         // head-bob on the stride (peaks mid-stance) — stillness when idle
         const ob = rig.outfit;
-        if (!p.sitting && !jumping && ob.blend > 0.02) {
+        if (!driving && !p.sitting && !jumping && ob.blend > 0.02) {
           g.position.y += Math.abs(Math.cos(ob.phase)) * 0.045 * ob.blend;
         }
 
@@ -1585,6 +1824,38 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           disposeOutfit(rig.outfit);
           rigs.delete(id);
         }
+      }
+      // ── hall carts: ease parked + rival carts to the relay, roll the mesh ──
+      // (the cart I drive is authoritative — its sim is never touched here)
+      for (const c of st.carts) {
+        const rig = getCartRig(c.id, c.color);
+        let sim = cartSim.get(c.id);
+        if (!sim) {
+          sim = { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0 };
+          cartSim.set(c.id, sim);
+        }
+        if (c.id !== myCartId) {
+          const k = Math.min(1, dt * 6);
+          // snap a fresh / teleported cart, ease everything else (no lerp lag
+          // across the hall, no pop for sub-meter corrections)
+          if (Math.hypot(c.x - sim.x, c.z - sim.z) > 3) {
+            sim.x = c.x;
+            sim.z = c.z;
+            sim.facing = c.facing;
+          } else {
+            sim.x += (c.x - sim.x) * k;
+            sim.z += (c.z - sim.z) * k;
+            let d = c.facing - sim.facing;
+            while (d > Math.PI) d -= Math.PI * 2;
+            while (d < -Math.PI) d += Math.PI * 2;
+            sim.facing += d * k;
+          }
+          sim.speed += (c.speed - sim.speed) * k;
+          sim.steer += (0 - sim.steer) * k;
+        }
+        rig.group.position.set(sim.x, 0, sim.z);
+        rig.group.rotation.y = sim.facing;
+        poseCart(rig, dt, { speed: sim.speed, steer: sim.steer, elapsed });
       }
       // ── ball mesh: held balls render from synced player positions ──
       // (never from fragile local adoption chains — always visible)
@@ -1761,11 +2032,13 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       // ── in-world prompt: project the current action's anchor to screen ──
       const pk = actionKey(lastCtx, {
         sitting: st.players[MY_ID]?.sitting ?? me.sitting,
+        driving: myCartId !== null,
         gameStatus: st.game.status,
         dodgeStatus: st.dodge.status,
       });
       if (pk) {
-        actionAnchor(pk, me, anchorWorld);
+        const nearCartSim = pk === "drive" && lastCtx.nearCart ? cartSim.get(lastCtx.nearCart) : undefined;
+        actionAnchor(pk, me, anchorWorld, nearCartSim ? { x: nearCartSim.x, z: nearCartSim.z } : undefined);
         anchorNdc.set(anchorWorld.x, anchorWorld.y, anchorWorld.z).project(camera);
         promptAnchor.key = pk;
         promptAnchor.visible = anchorNdc.z > -1 && anchorNdc.z < 1;
@@ -1999,6 +2272,11 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       document.removeEventListener("gesturechange", blockPageZoom);
       if (joy.owner === "canvas") resetJoy();
       env.dispose();
+      for (const r of cartRigs.values()) {
+        scene.remove(r.group);
+        disposeCart(r);
+      }
+      cartRigs.clear();
       for (const sim of dodgeSims.values()) scene.remove(sim.mesh);
       for (const p of popups) scene.remove(p.sp);
       renderer.dispose();
