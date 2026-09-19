@@ -2027,6 +2027,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
 
       // ── camera follow: both the position AND the gaze point are damped,
       // so the frame glides instead of shaking ──
+      (window as unknown as { __hall?: unknown }).__hall = { me: { x: me.x, z: me.z, facing: me.facing }, myCartId, carts: st.carts };
       const tx = me.x * 0.72;
       const tz = me.z * 0.7 + 2.4;
       desired.set(tx, camDist * 0.64, tz + camDist * 0.6);

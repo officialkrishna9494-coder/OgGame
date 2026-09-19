@@ -220,9 +220,12 @@ export interface CartPose {
 export function poseCart(rig: CartRig, dt: number, p: CartPose): void {
   const spin = (p.speed / CART_WHEEL_R) * dt;
   for (const w of rig.wheels) w.rotation.x += spin;
-  // steer is the driver's held wheel (−1…1), already smoothed in the sim
+  // steer is the driver's held wheel (−1…1), already smoothed in the sim.
+  // The wheel's rolling axis is +z, so a positive rotation.y would point the
+  // fronts toward +x — but the car's right is −x (facing convention: 0 = +z),
+  // which is why they used to slew opposite the turn. Negated to match.
   rig.steer = damp(rig.steer, p.steer, dt, 10);
-  for (const pivot of rig.steerPivots) pivot.rotation.y = rig.steer * 0.42;
+  for (const pivot of rig.steerPivots) pivot.rotation.y = -rig.steer * 0.42;
   // lean into corners, squat under braking, tremble softly with speed
   const grip = Math.min(1, Math.abs(p.speed) / 6);
   const accel = dt > 0 ? (p.speed - rig.prevSpeed) / dt : 0;
