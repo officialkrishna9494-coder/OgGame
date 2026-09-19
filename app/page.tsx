@@ -15,6 +15,7 @@ import GamePanel from "../components/GamePanel";
 import RpsPanel from "../components/RpsPanel";
 import SosAlert from "../components/SosAlert";
 import Hud from "../components/Hud";
+import TvScreenOverlay from "../components/TvScreenOverlay";
 import RotatePrompt from "../components/RotatePrompt";
 import TvPanel from "../components/TvPanel";
 import VoicePanel from "../components/VoicePanel";
@@ -307,6 +308,9 @@ function HallClient({ me }: { me: Identity }) {
 
       {/* soft vignette for coziness */}
       <div className="pointer-events-none absolute inset-0 z-10 bg-[radial-gradient(ellipse_at_center,transparent_58%,rgba(120,90,110,0.14)_100%)]" />
+
+      {/* live picture on the 3D TV (muted — the TV panel carries sound) */}
+      <TvScreenOverlay tv={{ ...tv, playlist: tvPlaylist }} fallbackPlaylist={room.tv} />
 
       <Hud
         roomName={room.name}

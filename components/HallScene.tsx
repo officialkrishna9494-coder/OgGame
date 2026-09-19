@@ -18,6 +18,7 @@ import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
 import { drivePad } from "../lib/drive-pad";
 import { cycleViewMode, isFirstPerson, viewState } from "../lib/view-state";
+import { tvScreenAnchor } from "../lib/tv-screen";
 import { resetTurbo, turboState } from "../lib/turbo-state";
 import { COLLIDERS, SOFA_SEATS } from "../lib/room-defaults";
 
@@ -538,7 +539,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       drawIconText(g, tvState.playing ? "play" : "pause", `${mm} · synced`, 256, 210, 18, "#ffd166");
       g.font = "400 20px system-ui, sans-serif";
       g.fillStyle = "rgba(255,255,255,0.75)";
-      g.fillText("open the TV panel below to watch together", 256, 248);
+      g.fillText("open the TV panel below for sound & the shelf", 256, 248);
       tvTex.needsUpdate = true;
     };
     drawTv();
@@ -1107,6 +1108,11 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     const desired = new THREE.Vector3();
     const anchorWorld = { x: 0, y: 0, z: 0 };
     const anchorNdc = new THREE.Vector3();
+    // live-TV overlay scratch — static screen corners projected per frame,
+    // preallocated so the 60 fps loop never allocates
+    const tvV = new THREE.Vector3();
+    const tvPX = [0, 0, 0, 0];
+    const tvPY = [0, 0, 0, 0];
 
     const step = (dt: number) => {
       const st = stateRef.current;
@@ -2333,6 +2339,40 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         promptAnchor.key = null;
       }
 
+      // ── live TV overlay: project the screen quad for the DOM player ──
+      // Static world corners (the 4.8 × 2.6 plane); the canvas status card
+      // stays the fallback underneath. Facing + shelf gates keep a stray
+      // quad from flashing when the screen turns away or is empty.
+      {
+        const shelf = st.tv.playlist.length ? st.tv.playlist : st.room.tv;
+        let show = shelf.length > 0 && camera.position.z > TV.bodyZ + 0.3;
+        if (show) {
+          // TL, TR, BR, BL around the screen centre
+          for (let i = 0; i < 4; i++) {
+            const cx = TV.x + (i === 0 || i === 3 ? -2.4 : 2.4);
+            const cy = TV.screenY + (i < 2 ? 1.3 : -1.3);
+            tvV.set(cx, cy, TV.bodyZ + 0.12).project(camera);
+            if (!(tvV.z > -1 && tvV.z < 1)) {
+              show = false;
+              break;
+            }
+            tvPX[i] = ((tvV.x + 1) / 2) * viewW;
+            tvPY[i] = ((1 - tvV.y) / 2) * viewH;
+          }
+        }
+        tvScreenAnchor.visible = show;
+        if (show) {
+          tvScreenAnchor.x0 = tvPX[0];
+          tvScreenAnchor.y0 = tvPY[0];
+          tvScreenAnchor.x1 = tvPX[1];
+          tvScreenAnchor.y1 = tvPY[1];
+          tvScreenAnchor.x2 = tvPX[2];
+          tvScreenAnchor.y2 = tvPY[2];
+          tvScreenAnchor.x3 = tvPX[3];
+          tvScreenAnchor.y3 = tvPY[3];
+        }
+      }
+
       // room finishes itself around an inside camera: front wall + ceiling
       // appear in first-person / chase, hide in follow (open dollhouse)
       env.setEnclosure(viewState.mode !== 0);
@@ -2548,6 +2588,8 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       hallToss.fn = null;
       hallJump.fn = null;
       promptAnchor.key = null;
+      // leaving the hall: no stale quad may keep the overlay pinned
+      tvScreenAnchor.visible = false;
       resetTurbo();
       window.clearInterval(roomTimer);
       window.removeEventListener("resize", onResize);

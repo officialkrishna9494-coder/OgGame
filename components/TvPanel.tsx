@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TvState } from "../lib/hall-types";
+import { loadYouTubeApi } from "../lib/youtube";
 import { Icon } from "./icons";
 
 interface Props {
@@ -21,27 +22,6 @@ interface Props {
 
 const DRIFT_TOLERANCE = 2.5;
 const HEARTBEAT_MS = 15_000;
-
-let apiPromise: Promise<typeof YT> | null = null;
-function loadYTApi(): Promise<typeof YT> {
-  if (apiPromise) return apiPromise;
-  apiPromise = new Promise((resolve) => {
-    const w = window as unknown as { YT?: typeof YT; onYouTubeIframeAPIReady?: () => void };
-    if (w.YT?.Player) {
-      resolve(w.YT);
-      return;
-    }
-    const prev = w.onYouTubeIframeAPIReady;
-    w.onYouTubeIframeAPIReady = () => {
-      prev?.();
-      resolve(w.YT!);
-    };
-    const tag = document.createElement("script");
-    tag.src = "https://www.youtube.com/iframe_api";
-    document.head.appendChild(tag);
-  });
-  return apiPromise;
-}
 
 function fmt(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
@@ -107,7 +87,7 @@ export default function TvPanel({ tv, fallbackPlaylist, compact, onControl, onCl
     if (!videoId || !mountRef.current) return;
     let player: YT.Player | null = null;
     let dead = false;
-    loadYTApi()
+    loadYouTubeApi()
       .then((YT) => {
         if (dead || !mountRef.current) return;
         player = new YT.Player(mountRef.current, {

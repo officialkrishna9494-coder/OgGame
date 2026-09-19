@@ -27,3 +27,30 @@ export async function fetchVideoTitle(videoId: string): Promise<string | null> {
     return null;
   }
 }
+
+// ─── shared IFrame API loader ───────────────────────────────────────────────
+// One <script> for the whole hall: the TV panel (audible, user-driven) and
+// the 3D TV overlay (muted, ambient) share it, so the API boots once no
+// matter which mounts first.
+
+let apiPromise: Promise<typeof YT> | null = null;
+
+export function loadYouTubeApi(): Promise<typeof YT> {
+  if (apiPromise) return apiPromise;
+  apiPromise = new Promise((resolve) => {
+    const w = window as unknown as { YT?: typeof YT; onYouTubeIframeAPIReady?: () => void };
+    if (w.YT?.Player) {
+      resolve(w.YT);
+      return;
+    }
+    const prev = w.onYouTubeIframeAPIReady;
+    w.onYouTubeIframeAPIReady = () => {
+      prev?.();
+      resolve(w.YT!);
+    };
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+  });
+  return apiPromise;
+}
