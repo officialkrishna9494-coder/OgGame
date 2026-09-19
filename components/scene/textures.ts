@@ -441,7 +441,7 @@ export function trackTexture(): THREE.CanvasTexture {
   g.fillStyle = "rgba(255,255,255,0.5)";
   g.font = "800 44px system-ui, sans-serif";
   g.textAlign = "center";
-  g.fillText("TURBO RACEWAY", 0, 0);
+  g.fillText("OG SPELL", 0, 0);
   g.restore();
   return tex(c);
 }
@@ -479,7 +479,7 @@ export function bannerTexture(): THREE.CanvasTexture {
   g.fillStyle = "#ffd166";
   g.font = "900 64px system-ui, sans-serif";
   g.textAlign = "center";
-  g.fillText("TURBO RACEWAY", 512, 88);
+  g.fillText("OG SPELL", 512, 88);
   return tex(c);
 }
 
