@@ -16,7 +16,8 @@
 //   poking into the sofa you're standing against.
 // Pure functions over plain numbers: no allocation in the frame loop.
 
-import { BALL_BOUNDS, COLLIDERS, HALL_BOUNDS, SOLIDS, type Solid } from "./room-defaults";
+import { BALL_BOUNDS, COLLIDERS, SOLIDS, type Solid } from "./room-defaults";
+import { DOOR_GAP, walkableXZ } from "./hall-layout";
 
 export const BALL_RADIUS = 0.28;
 /** how close (centre to centre) you must be to scoop up a resting ball —
@@ -183,6 +184,19 @@ function keepInBounds(b: BallBody): number {
   } else if (b.x > BALL_BOUNDS.xMax) {
     b.x = BALL_BOUNDS.xMax;
     if (b.vx > 0) b.vx *= -WALL_BOUNCE;
+    hit = TOUCH_WALL;
+  }
+  // shared wall (x = −23) with the raceway door gap: bounce off the masonry,
+  // fly through the opening
+  const inGap = b.z > DOOR_GAP.z0 + BALL_RADIUS && b.z < DOOR_GAP.z1 - BALL_RADIUS;
+  if (!inGap && b.x > -23.4 - BALL_RADIUS && b.x < -23 + BALL_RADIUS) {
+    if (b.x > -23.2) {
+      b.x = -23 + BALL_RADIUS;
+      if (b.vx < 0) b.vx *= -WALL_BOUNCE;
+    } else {
+      b.x = -23.4 - BALL_RADIUS;
+      if (b.vx > 0) b.vx *= -WALL_BOUNCE;
+    }
     hit = TOUCH_WALL;
   }
   if (b.z < BALL_BOUNDS.zMin) {
@@ -369,7 +383,9 @@ interface ReachField {
 let field: ReachField | null = null;
 
 function playerCanStand(x: number, z: number): boolean {
-  if (Math.abs(x) > HALL_BOUNDS.x || z < HALL_BOUNDS.zMin || z > HALL_BOUNDS.zMax) return false;
+  // both rooms + the doorway count as floor (walls are handled by callers);
+  // furniture footprints still block, so rescues never land inside a prop
+  if (!walkableXZ(x, z, PLAYER_RADIUS)) return false;
   for (const c of colliderBuckets[bucketOf(x, z)]) {
     const cx = clamp(x, c.x - c.hx, c.x + c.hx);
     const cz = clamp(z, c.z - c.hz, c.z + c.hz);

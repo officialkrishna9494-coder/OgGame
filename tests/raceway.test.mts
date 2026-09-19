@@ -1,0 +1,209 @@
+// ─── Cozy Hall · raceway contract tests ─────────────────────────────────────
+// The big door + bigger race room, locked in as executable specs:
+//
+//   DOOR ...... big opening on the left wall, front (camera) half
+//   ROOM ...... 78 × 36 west of the hall (twisty circuit needs the space)
+//   TRACK ..... closed multi-turn centerline, two lanes, ramps on the line,
+//               lap gates in travel order, clean racing props only
+//
+// Run: `npx tsx tests/raceway.test.mts` (or `npm test` runs every suite)
+// Pure Node — no browser, no dev server. Fails non-zero on violation.
+
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, "..");
+const read = (p: string) => fs.readFileSync(path.join(root, p), "utf8");
+
+const layout = await import("../lib/hall-layout");
+const { HALL, RACE, DOOR_GAP, RAMPS, TRACK, TRACK_POINTS, TRACK_PLANE, TRACK_WIDTH, TRACK_GATES, sampleTrackCenterline, clampToRooms, rampGroundAt, resolveRamp, PROPS } = layout;
+const { BALL_BOUNDS } = await import("../lib/room-defaults");
+
+let passed = 0;
+const ok = (name: string, fn: () => void) => {
+  fn();
+  passed++;
+  console.log(`  ✓ ${name}`);
+};
+
+console.log("raceway — big door + bigger twisty circuit");
+
+// ── 1 · big door on the left wall, front half ────────────────────────────────
+ok("door: big opening on the left wall, front (camera) half", () => {
+  assert.equal(HALL.xMin, -23);
+  const w = DOOR_GAP.z1 - DOOR_GAP.z0;
+  assert.ok(w >= 5, `door ${w} m wide — karts must fit through side by side`);
+  assert.ok(DOOR_GAP.h >= 4, `door ${DOOR_GAP.h} m tall`);
+  assert.ok(DOOR_GAP.z0 > 0, "door sits on the front (camera) half, the bottom side");
+  assert.ok(DOOR_GAP.z1 <= HALL.zMax, "door stays inside the shared wall");
+});
+
+// ── 2 · bigger room west ─────────────────────────────────────────────────────
+ok("room: bigger than the hall, due west through the door", () => {
+  const hallW = HALL.xMax - HALL.xMin;
+  const raceW = RACE.xMax - RACE.xMin;
+  const raceD = RACE.zMax - RACE.zMin;
+  assert.equal(RACE.xMax, HALL.xMin, "shares the hall's left wall");
+  assert.ok(raceW >= hallW + 20, `race ${raceW} m wide — room for turns and turns`);
+  assert.ok(raceW * raceD > hallW * (HALL.zMax - HALL.zMin), "race annex is the bigger room");
+});
+
+// ── 3 · twisty two-lane centerline ───────────────────────────────────────────
+const loop = sampleTrackCenterline(16);
+
+ok("track: closed multi-turn loop with two lanes", () => {
+  assert.ok(TRACK_POINTS.length >= 8, "enough control points for real turns");
+  assert.equal(TRACK_WIDTH, 7);
+  assert.equal(TRACK.laneW, 3.5, "two 3.5 m lanes");
+  assert.ok(loop.length >= 128, "smoothly sampled");
+  // closed: last sample flows back into the first
+  const first = loop[0];
+  const last = loop[loop.length - 1];
+  const gap = Math.hypot(first.x - last.x, first.z - last.z);
+  assert.ok(gap < 3, `loop closes (last→first ${gap.toFixed(2)} m)`);
+  // every control point lives inside the room with racing margin
+  for (const [x, z] of TRACK_POINTS) {
+    assert.ok(x > RACE.xMin + 3 && x < RACE.xMax - 3, `point (${x},${z}) inside west/east walls`);
+    assert.ok(z > RACE.zMin + 3 && z < RACE.zMax - 3, `point (${x},${z}) inside north/south walls`);
+  }
+  // genuinely twisty: heading must swing through all four quadrants
+  const quads = new Set<string>();
+  for (let i = 0; i < loop.length; i += 8) {
+    const p = loop[i];
+    const q = loop[(i + 8) % loop.length];
+    quads.add(`${Math.sign(q.x - p.x)},${Math.sign(q.z - p.z)}`);
+  }
+  assert.ok(quads.size >= 4, `turns in every direction (${quads.size} heading quadrants)`);
+});
+
+const distToLoop = (x: number, z: number) => {
+  let best = Infinity;
+  for (const p of loop) {
+    const d = Math.hypot(x - p.x, z - p.z);
+    if (d < best) best = d;
+  }
+  return best;
+};
+
+// ── 4 · ramps for jumps, on the racing line ──────────────────────────────────
+ok("ramps: jump ramps squarely on the straights, facing travel", () => {
+  assert.ok(RAMPS.length >= 3, "a ramp for every straight");
+  for (const r of RAMPS) {
+    assert.ok(r.width <= TRACK_WIDTH, "ramp fits inside the ribbon");
+    assert.ok(r.height >= 1 && r.height <= 1.6, "launch height stays kart-safe");
+    // midpoint of the slope must sit on the track
+    const mx = r.x + r.dx * (r.length / 2);
+    const mz = r.z + r.dz * (r.length / 2);
+    assert.ok(distToLoop(mx, mz) <= TRACK_WIDTH / 2, `ramp at (${r.x},${r.z}) rides the line`);
+    // facing travel: positive dot with the local loop direction
+    let bi = 0;
+    let bd = Infinity;
+    loop.forEach((p, i) => {
+      const d = Math.hypot(mx - p.x, mz - p.z);
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    });
+    const a = loop[bi];
+    const b = loop[(bi + 8) % loop.length];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const dot = ((b.x - a.x) / len) * r.dx + ((b.z - a.z) / len) * r.dz;
+    assert.ok(dot > 0.7, `ramp faces travel (dot ${dot.toFixed(2)})`);
+  }
+  // heightfield carries wheels over the mid-slope
+  const r0 = RAMPS[0];
+  const mid = rampGroundAt(r0.x + r0.dx * (r0.length / 2), r0.z + r0.dz * (r0.length / 2));
+  assert.ok(mid > 0.3, "mid-slope has real height");
+  // masonry beside the tall end shoves back at ground level …
+  const lipX = r0.x + r0.dx * r0.length;
+  const lipZ = r0.z + r0.dz * r0.length;
+  const side = resolveRamp(lipX - r0.dz * (r0.width / 2 + 0.4), lipZ + r0.dx * (r0.width / 2 + 0.4), 0, 0.8);
+  assert.equal(side.hit, true, "masonry beside the tall end shoves back");
+  // … while riding the mid-slope is never a wall
+  const ride = resolveRamp(r0.x + r0.dx * (r0.length / 2), r0.z + r0.dz * (r0.length / 2), mid, 0.8);
+  assert.equal(ride.hit, false, "riding the slope is never a wall");
+});
+
+// ── 5 · lap gates in travel order ────────────────────────────────────────────
+ok("gates: lap gates ring the loop in travel order", () => {
+  assert.ok(TRACK_GATES.length >= 5, "start/finish plus sector gates");
+  const order = TRACK_GATES.map((gt) => {
+    let bi = 0;
+    let bd = Infinity;
+    loop.forEach((p, i) => {
+      const d = Math.hypot(gt.x - p.x, gt.z - p.z);
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    });
+    assert.ok(bd <= 4.5, `gate (${gt.x},${gt.z}) sits on the loop`);
+    return bi;
+  });
+  for (let k = 1; k < order.length; k++) {
+    const prev = order[k - 1];
+    const cur = order[k];
+    const fwd = (cur - prev + loop.length) % loop.length;
+    assert.ok(fwd > 0 && fwd < loop.length / 2, `gate ${k} follows gate ${k - 1} in travel order`);
+  }
+});
+
+// ── 6 · clean racing props, clear of the ribbon ──────────────────────────────
+ok("props: tires, cones and floodlights only — clear of the ribbon", () => {
+  const raceProps = PROPS.filter((p) => p.x < HALL.xMin);
+  assert.ok(raceProps.length >= 10, "a dressed circuit");
+  for (const p of raceProps) {
+    const r = p.shape === "box" ? Math.max(p.hx, p.hz) : p.r;
+    const need = TRACK_WIDTH / 2 + r + 0.75;
+    const d = distToLoop(p.x, p.z);
+    assert.ok(d >= need, `prop at (${p.x},${p.z}) ${d.toFixed(1)} m off the line (needs ${need.toFixed(1)})`);
+  }
+  const env = read("components/scene/environment.ts");
+  // scope to the raceway annex block (the dodgeball court has its own flags)
+  const raceBlock = env.slice(env.indexOf("raceway annex"), env.indexOf("windows + light beams"));
+  assert.ok(raceBlock.length > 1000, "race annex block found");
+  for (const banned of ["grandstand", "crowd", "bannerTexture(", "bunting", "flagGeo"]) {
+    assert.ok(!raceBlock.includes(banned), `no "${banned}" — the track stays clean`);
+  }
+});
+
+// ── 7 · paint comes from the same centerline ─────────────────────────────────
+ok("paint: track texture is drawn from the centerline over its plane", () => {
+  const tex = read("components/scene/textures.ts");
+  assert.match(tex, /sampleTrackCenterline/, "one centerline source for paint");
+  assert.match(tex, /TRACK_PLANE/, "paint maps the same plane the mesh uses");
+  assert.match(tex, /TRACK_WIDTH/, "curbs scale with the ribbon");
+  assert.ok(TRACK_PLANE.x0 >= RACE.xMin + 1 && TRACK_PLANE.x1 <= RACE.xMax - 1, "paint plane inside the room");
+  assert.ok(Math.abs(TRACK.cx - (TRACK_PLANE.x0 + TRACK_PLANE.x1) / 2) < 0.01, "mesh centres on its paint");
+});
+
+// ── 8 · balls, feet and karts all reach the far turn ─────────────────────────
+ok("bounds: balls, walkers and karts cover the whole bigger room", () => {
+  assert.ok(BALL_BOUNDS.xMin <= RACE.xMin + 1, "throws fly to the far hairpin");
+  // doorway passes, masonry blocks
+  const through = clampToRooms(-23.2, 10, 0.4);
+  assert.ok(through.x < HALL.xMin, "doorway lets you through");
+  const wall = clampToRooms(-23.2, 0, 0.4);
+  assert.equal(wall.x, HALL.xMin + 0.4, "shared wall blocks off the gap");
+  const far = clampToRooms(-200, 0, 0.4);
+  assert.equal(far.x, RACE.xMin + 0.4, "far wall holds");
+});
+
+// ── 9 · rider glued to the seat + speed-scaled launches ─────────────────────
+ok("air: rider rides kart height, take-off scales with driving speed", () => {
+  const scene = read("components/HallScene.tsx");
+  // seat placement AND the per-frame baseY both add the kart's air height —
+  // otherwise the hips stay grounded while a jumping car flies without them
+  assert.match(scene, /g\.position\.set\(seatX, driverSim\.y \+ CART_RIDER_Y, seatZ\)/, "seat follows kart air");
+  assert.match(scene, /driving && driverSim \? driverSim\.y \+ CART_RIDER_Y/, "rider base follows kart air");
+  // lip exit converts forward speed × climbed grade into upward velocity —
+  // crawling dribbles off, turbo launches; reversing never launches
+  assert.match(scene, /Math\.max\(0, sim\.speed\) \* grade/, "take-off scales with speed");
+  assert.match(scene, /grade > 0\.02/, "no micro-pops off flat lips");
+});
+
+console.log(`\nPASS ${passed} checks — big door + bigger twisty circuit hold.`);

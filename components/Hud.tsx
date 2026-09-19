@@ -2,10 +2,12 @@
 
 // ─── Cozy Hall · HUD — one environment, everything within reach ─────────────
 // Desktop: single rounded action dock along the bottom, with the contextual
-// action first (press E) and a keyboard legend underneath.
-// Mobile landscape, console layout: floating joystick in the left thumb
-// zone; on the right, the contextual ACT button with a "⋯" button above it
-// that opens a compact, scrollable tile menu (emotes tucked behind "react").
+// action first (press E) and a keyboard legend underneath. (Untouched.)
+// Mobile landscape, console layout:
+//   LEFT thumb .... floating joystick (on foot) · steer ◀ ▶ + TURBO (in car)
+//   RIGHT thumb ... ACT circle (upper, contextual) above JUMP = SPACE (lower,
+//                   on foot) · ACT above pedals ▲ ▼ (in car)
+//   TOP-RIGHT ..... ⋯ tile menu (every other action: react, poke, tv, …)
 // Both: an in-world prompt floats over whatever you can use right now.
 // Icons come from components/icons — emoji appear only as emotes.
 
@@ -19,11 +21,12 @@ import { useInteraction, type Interaction } from "../lib/useInteraction";
 import type { VoiceStatus } from "../lib/useVoice";
 import { FullscreenNudge, FullscreenToggle } from "./FullscreenControls";
 import { Icon, isIconName, type IconName } from "./icons";
-import { hallJump } from "./HallScene";
-import InteractPrompt, { HoldRing, KeyCap } from "./InteractPrompt";
+import InteractPrompt, { KeyCap } from "./InteractPrompt";
 import Joystick from "./Joystick";
 import CarPad from "./CarPad";
 import TurboGauge from "./TurboGauge";
+import ActButton from "./touch/ActButton";
+import JumpButton from "./touch/JumpButton";
 
 interface Props {
   roomName: string;
@@ -573,48 +576,15 @@ function MobileHud(p: HudProps) {
       {/* ── joystick, left thumb zone (hidden in the car: the hub steers) ── */}
       {!driving && <Joystick />}
 
-      {/* ── on-foot right column: ACT above a big JUMP — this round button is
-          the mobile SPACE. In the car the column swaps for the CarPad hub. ── */}
+      {/* ── on-foot right column: ACT (upper, contextual) above JUMP (lower,
+          the mobile SPACE) — same ActButton the car hub uses, so the thumb
+          never re-learns it. In the car the column swaps for CarPad. ── */}
       {driving ? (
         <CarPad action={action} interaction={interaction} />
       ) : (
         <div className="absolute bottom-[calc(var(--safe-b)+4.5rem)] right-[calc(var(--safe-r)+2.25rem)] flex w-[76px] flex-col items-center gap-3">
-          <div className="relative h-[76px] w-[76px]">
-          {action ? (
-            <button
-              key={action.key}
-              {...interaction.bind}
-              onContextMenu={(e) => e.preventDefault()}
-              aria-label={action.prompt}
-              style={{ boxShadow: `0 10px 28px -8px ${action.glow}`, borderColor: action.glow }}
-              className="animate-pop-in pointer-events-auto relative flex h-full w-full touch-manipulation select-none items-center justify-center rounded-full border-2 bg-white/95 text-[#3d3347] backdrop-blur transition-transform [-webkit-touch-callout:none] active:scale-90"
-            >
-              <span key={interaction.pulse} className={`flex flex-col items-center ${interaction.pulse ? "animate-act-press" : ""}`}>
-                <Icon name={action.icon} size={26} />
-                <span className="mt-1 text-[9px] font-black uppercase tracking-[0.16em]">act</span>
-                <span className="max-w-[62px] truncate text-[8px] font-bold uppercase tracking-wide text-[#8a7f98]">
-                  {action.hold && interaction.holding ? "hold…" : action.label}
-                </span>
-              </span>
-              {interaction.holding && <HoldRing glow={action.glow} width={6} />}
-            </button>
-          ) : (
-            // resting ghost: marks where contextual actions will appear
-            <span className="absolute inset-2 rounded-full border-2 border-dashed border-white/45" />
-          )}
-        </div>
-        {/* jump — the stick has no spacebar, so this round button IS space */}
-        <button
-          onPointerDown={(e) => {
-            e.preventDefault();
-            hallJump.fn?.();
-          }}
-          title="jump"
-          aria-label="jump"
-          className="pointer-events-auto flex h-14 w-14 touch-manipulation items-center justify-center rounded-full bg-white/90 text-[#4a3f55] shadow-lg ring-1 ring-black/[0.07] backdrop-blur transition-all active:scale-90"
-        >
-          <Icon name="caretUp" size={24} />
-        </button>
+          <ActButton action={action} interaction={interaction} />
+          <JumpButton />
         </div>
       )}
     </div>

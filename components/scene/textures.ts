@@ -3,6 +3,7 @@
 // crisp at any zoom, and each texture is created once and shared.
 
 import * as THREE from "three";
+import { TRACK_PLANE, TRACK_POINTS, TRACK_WIDTH, sampleTrackCenterline } from "../../lib/hall-layout";
 
 function canvas(w: number, h: number) {
   const c = document.createElement("canvas");
@@ -332,5 +333,180 @@ export function padTexture(): THREE.CanvasTexture {
   g.fillText("START", 256, 356);
   g.font = "700 32px ui-rounded, system-ui, sans-serif";
   g.fillText("dodgeball", 256, 398);
+  return tex(c);
+}
+
+/** Raceway: twisty two-lane ribbon with curbs, dashes, start checker + arrows. */
+export function trackTexture(): THREE.CanvasTexture {
+  // Paint plane = TRACK_PLANE (74 × 32 world); canvas top = world −z.
+  // The loop is the sampled TRACK_POINTS centerline — move the track in
+  // lib/hall-layout, never here.
+  const PX = 24;
+  const PW = TRACK_PLANE.x1 - TRACK_PLANE.x0;
+  const PD = TRACK_PLANE.z1 - TRACK_PLANE.z0;
+  const W = Math.round(PW * PX);
+  const H = Math.round(PD * PX);
+  const { c, g } = canvas(W, H);
+  const X = (wx: number) => ((wx - TRACK_PLANE.x0) / PW) * W;
+  const Y = (wz: number) => ((wz - TRACK_PLANE.z0) / PD) * H;
+  const S = (wm: number) => wm * PX; // world metres → px
+  // grass base
+  g.fillStyle = "#8fae7e";
+  g.fillRect(0, 0, W, H);
+  // subtle mow stripes
+  g.fillStyle = "rgba(255,255,255,0.05)";
+  for (let i = 0; i < PD / 4; i++) g.fillRect(0, (i * 4 * PX) % H, W, 2 * PX);
+  const loop = sampleTrackCenterline(24);
+  const trace = () => {
+    g.beginPath();
+    loop.forEach((p, i) => (i ? g.lineTo(X(p.x), Y(p.z)) : g.moveTo(X(p.x), Y(p.z))));
+    g.closePath();
+  };
+  // curbs: white base, red dashes, then asphalt over the middle
+  g.lineJoin = "round";
+  g.lineCap = "round";
+  g.strokeStyle = "#f4f1ea";
+  g.lineWidth = S(TRACK_WIDTH + 0.9);
+  trace();
+  g.stroke();
+  g.strokeStyle = "#e6395f";
+  g.lineWidth = S(TRACK_WIDTH + 0.9);
+  g.setLineDash([S(1.5), S(1.5)]);
+  trace();
+  g.stroke();
+  g.setLineDash([]);
+  g.strokeStyle = "#4a4d5e";
+  g.lineWidth = S(TRACK_WIDTH);
+  trace();
+  g.stroke();
+  // asphalt noise
+  const rand = rng(7);
+  g.fillStyle = "rgba(255,255,255,0.05)";
+  for (let i = 0; i < 900; i++) g.fillRect(rand() * W, rand() * H, 3, 3);
+  // two lanes: centre divider dashes along the loop
+  g.strokeStyle = "rgba(255,255,255,0.75)";
+  g.lineWidth = S(0.22);
+  g.setLineDash([S(1.6), S(1.4)]);
+  trace();
+  g.stroke();
+  g.setLineDash([]);
+  // start/finish checker across the line at TRACK_POINTS[0], square to travel
+  {
+    const [sx, sz] = TRACK_POINTS[0];
+    const n0 = loop[0];
+    const n1 = loop[8 % loop.length];
+    const ang = Math.atan2(n1.z - n0.z, n1.x - n0.x); // canvas: x→x, y→z
+    g.save();
+    g.translate(X(sx), Y(sz));
+    g.rotate(ang);
+    const bw = S(1); // 1 m along travel
+    const bh = S(TRACK_WIDTH); // full ribbon across
+    const rows = 2;
+    const cols = 7;
+    for (let r = 0; r < rows; r++) {
+      for (let q = 0; q < cols; q++) {
+        g.fillStyle = (r + q) % 2 ? "#23232b" : "#f4f1ea";
+        g.fillRect(-bw / 2 + (bw / rows) * r, -bh / 2 + (bh / cols) * q, bw / rows + 1, bh / cols + 1);
+      }
+    }
+    g.restore();
+  }
+  // travel arrows sampled along the loop (pointing at the next sample)
+  g.fillStyle = "rgba(255,255,255,0.65)";
+  const arrowAt = (i: number) => {
+    const p = loop[i % loop.length];
+    const q = loop[(i + 8) % loop.length];
+    const ang = Math.atan2(q.x - p.x, q.z - p.z);
+    const ax = X(p.x);
+    const ay = Y(p.z);
+    const s = S(1.1);
+    g.save();
+    g.translate(ax, ay);
+    // canvas x = world x, canvas y = world z: tip (+x local) → (dx, dz)
+    g.rotate(Math.PI / 2 - ang);
+    g.beginPath();
+    g.moveTo(-s, -s * 0.7);
+    g.lineTo(s * 0.6, 0);
+    g.lineTo(-s, s * 0.7);
+    g.lineTo(-s * 0.25, 0);
+    g.closePath();
+    g.fill();
+    g.restore();
+  };
+  const step = Math.floor(loop.length / 8);
+  for (let k = 0; k < 8; k++) arrowAt(k * step + 4);
+  // painted title in the infield, reads from the camera side
+  g.save();
+  g.translate(X(-60), Y(-1));
+  g.fillStyle = "rgba(255,255,255,0.5)";
+  g.font = "800 44px system-ui, sans-serif";
+  g.textAlign = "center";
+  g.fillText("TURBO RACEWAY", 0, 0);
+  g.restore();
+  return tex(c);
+}
+
+/** Yellow/black chevrons for ramp slopes. */
+export function chevronTexture(): THREE.CanvasTexture {
+  const { c, g } = canvas(256, 256);
+  g.fillStyle = "#f4a259";
+  g.fillRect(0, 0, 256, 256);
+  g.fillStyle = "#23232b";
+  for (let i = -2; i < 6; i++) {
+    g.beginPath();
+    const x = i * 64;
+    g.moveTo(x, 256);
+    g.lineTo(x + 64, 256);
+    g.lineTo(x + 64 + 64, 0);
+    g.lineTo(x + 64, 0);
+    g.closePath();
+    g.fill();
+  }
+  return tex(c);
+}
+
+/** Start/finish banner across the line. */
+export function bannerTexture(): THREE.CanvasTexture {
+  const { c, g } = canvas(1024, 128);
+  g.fillStyle = "#23232b";
+  g.fillRect(0, 0, 1024, 128);
+  for (let i = 0; i < 32; i++) {
+    g.fillStyle = i % 2 ? "#f4f1ea" : "#23232b";
+    g.fillRect(i * 32, 0, 32, 16);
+    g.fillStyle = i % 2 ? "#23232b" : "#f4f1ea";
+    g.fillRect(i * 32, 112, 32, 16);
+  }
+  g.fillStyle = "#ffd166";
+  g.font = "900 64px system-ui, sans-serif";
+  g.textAlign = "center";
+  g.fillText("TURBO RACEWAY", 512, 88);
+  return tex(c);
+}
+
+/** Hanging sign for the big door (arrow drawn, never an emoji). */
+export function doorSignTexture(left: boolean): THREE.CanvasTexture {
+  const { c, g } = canvas(512, 256);
+  g.fillStyle = "#2b2430";
+  g.fillRect(0, 0, 512, 256);
+  g.strokeStyle = "#ffd166";
+  g.lineWidth = 10;
+  g.strokeRect(14, 14, 484, 228);
+  g.fillStyle = "#ffd166";
+  g.beginPath();
+  if (left) {
+    g.moveTo(70, 128);
+    g.lineTo(150, 78);
+    g.lineTo(150, 178);
+  } else {
+    g.moveTo(442, 128);
+    g.lineTo(362, 78);
+    g.lineTo(362, 178);
+  }
+  g.closePath();
+  g.fill();
+  g.fillStyle = "#f4f1ea";
+  g.font = "900 72px system-ui, sans-serif";
+  g.textAlign = "center";
+  g.fillText("RACEWAY", 256, 148);
   return tex(c);
 }

@@ -11,13 +11,18 @@ import {
   BOOKSHELF,
   CAFE,
   COURT,
+  DOOR_GAP,
   FLOOR_LAMPS,
   GARDEN,
   HALL,
   LOUNGE,
   NOOK,
   PLANTS,
+  RACE,
+  RAMPS,
   RIGHT_WALL_X,
+  TRACK,
+  TRACK_PLANE,
   courtBumpers,
 } from "../../lib/hall-layout";
 import type { DodgeState } from "../../lib/hall-types";
@@ -25,13 +30,16 @@ import { rankDodge } from "../../lib/hall-types";
 import { cylinder, floorLamp, freeze, glowSprite, mat, mesh, plant, roundedBox, sphere, steam, type Tick } from "./kit";
 import {
   chalkboardTexture,
+  chevronTexture,
   cloudLayerTexture,
   courtTexture,
+  doorSignTexture,
   glowTexture,
   ovalRugTexture,
   padTexture,
   roundRugTexture,
   stoneTexture,
+  trackTexture,
   windowViewTexture,
   woodFloorTexture,
 } from "./textures";
@@ -136,9 +144,13 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
     const span = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, m: THREE.Material) =>
       mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), m, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     // left wall is lateral to the follow camera (never blocks it), so it joins
-    // the always-visible shell look; butt joints touch at planes, never volumes
+    // the always-visible shell look; butt joints touch at planes, never volumes.
+    // The big door (DOOR_GAP) punches through to the raceway: two segments +
+    // a lintel, trimmed jambs, a brass threshold and a lit sign each side.
     const left = new THREE.Group();
-    left.add(span(L - 0.4, L, 0, H, B, F + 0.4, sideWallMat));
+    left.add(span(L - 0.4, L, 0, H, B, DOOR_GAP.z0, sideWallMat));
+    left.add(span(L - 0.4, L, 0, H, DOOR_GAP.z1, F + 0.4, sideWallMat));
+    left.add(span(L - 0.4, L, DOOR_GAP.h, H, DOOR_GAP.z0, DOOR_GAP.z1, sideWallMat));
     // front wall (camera side) + ceiling hide with the dollhouse open
     enclosure.add(span(L, R + 0.2, 0, H, F, F + 0.4, wallMat));
     const trims: Array<{ depth: number; y0: number; y1: number; overhang: number; m: THREE.Material }> = [
@@ -148,13 +160,38 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
       { depth: 0.24, y0: H - 0.24, y1: H, overhang: 0.03, m: trim },
     ];
     for (const t of trims) {
-      left.add(span(L, L + t.depth, t.y0, t.y1, B + t.depth, F + 0.4 + t.overhang, t.m));
+      if (t.y1 <= DOOR_GAP.h) {
+        // below the lintel: run each side of the doorway, never across it
+        left.add(span(L, L + t.depth, t.y0, t.y1, B + t.depth, DOOR_GAP.z0, t.m));
+        left.add(span(L, L + t.depth, t.y0, t.y1, DOOR_GAP.z1, F + 0.4 + t.overhang, t.m));
+      } else {
+        left.add(span(L, L + t.depth, t.y0, t.y1, B + t.depth, F + 0.4 + t.overhang, t.m));
+      }
       enclosure.add(span(L, R + t.overhang, t.y0, t.y1, F - t.depth, F, t.m));
     }
     const batten = new THREE.BoxGeometry(0.06, 0.9, 0.03);
     for (let x = HALL.xMin + 0.75; x < HALL.xMax; x += 1.5) enclosure.add(mesh(batten, trim, x, 0.56, F - 0.07));
     const battenL = new THREE.BoxGeometry(0.03, 0.9, 0.06);
-    for (let z = HALL.zMin + 0.75; z < HALL.zMax; z += 1.5) left.add(mesh(battenL, trim, L + 0.07, 0.56, z));
+    for (let z = HALL.zMin + 0.75; z < HALL.zMax; z += 1.5) {
+      if (z > DOOR_GAP.z0 - 0.6 && z < DOOR_GAP.z1 + 0.6) continue; // doorway stays clean
+      left.add(mesh(battenL, trim, L + 0.07, 0.56, z));
+    }
+    // door frame: jambs, header, brass threshold, lit sign each side
+    const jambMat = mat("#8a5a3b", 0.6);
+    for (const jz of [DOOR_GAP.z0, DOOR_GAP.z1]) left.add(mesh(roundedBox(0.5, DOOR_GAP.h, 0.35, 0.05), jambMat, L - 0.2, DOOR_GAP.h / 2, jz, true));
+    left.add(mesh(roundedBox(0.5, 0.35, DOOR_GAP.z1 - DOOR_GAP.z0 + 0.7, 0.05), jambMat, L - 0.2, DOOR_GAP.h + 0.17, (DOOR_GAP.z0 + DOOR_GAP.z1) / 2, true));
+    left.add(mesh(new THREE.BoxGeometry(1.2, 0.05, DOOR_GAP.z1 - DOOR_GAP.z0), mat("#b08d5f", 0.45, { metalness: 0.35 }), L, 0.025, (DOOR_GAP.z0 + DOOR_GAP.z1) / 2));
+    const signL = doorSignTexture(true);
+    const signR = doorSignTexture(false);
+    disposables.push(signL, signR);
+    const sign1 = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.5), new THREE.MeshBasicMaterial({ map: signL }));
+    sign1.position.set(L + 0.07, DOOR_GAP.h + 1.2, (DOOR_GAP.z0 + DOOR_GAP.z1) / 2);
+    sign1.rotation.y = Math.PI / 2;
+    left.add(sign1);
+    const sign2 = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.5), new THREE.MeshBasicMaterial({ map: signR }));
+    sign2.position.set(L - 0.47, DOOR_GAP.h + 1.2, (DOOR_GAP.z0 + DOOR_GAP.z1) / 2);
+    sign2.rotation.y = -Math.PI / 2;
+    left.add(sign2);
     // ceiling slab at the wall tops + wood beams. It must NOT cast shadows or
     // the sun stops being the room's key light the moment it appears.
     const ceil = mesh(new THREE.BoxGeometry(W + 0.8, 0.3, D + 0.8), mat("#f3ecdd", 1), CX + 0.2, H + 0.15, CZ - 0.2);
@@ -195,12 +232,171 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
       enclosure.add(win);
     }
     const winL = miniWindow();
-    winL.position.set(L + 0.05, 6.8, 6);
+    winL.position.set(L + 0.05, 6.8, 3); // clear of the doorway (gap starts at z = 7)
     winL.rotation.y = Math.PI / 2;
     left.add(winL);
     root.add(left, enclosure);
     freeze(left);
     freeze(enclosure);
+  }
+
+  // ─────────────────── raceway annex (big room west, big door) ─────────────
+  // 78 × 36 due west through the big door. South wall + ceiling hide with the
+  // dollhouse open (same rule as room 1); everything else always shows.
+  // The twisty two-lane ribbon, ramps and racing props below are placed from
+  // TRACK_POINTS / TRACK_PLANE / RAMPS in lib/hall-layout — move them there,
+  // not here. No stands, no arch gates: a clean professional circuit.
+  const raceGated = new THREE.Group(); // south wall + ceiling — view-gated
+  {
+    const wallMat = mat("#fbf5ea", 0.95);
+    const sideWallMat = mat("#f7eddc", 0.95);
+    const trim = mat("#fffaf2", 0.7);
+    const wood = mat("#c9a876", 0.75);
+    const wainscot = mat("#f0dfc6", 0.9);
+    const span2 = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, m: THREE.Material) =>
+      mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), m, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    const RX0 = RACE.xMin;
+    const RX1 = RACE.xMax;
+    const RCX = (RX0 + RX1) / 2;
+    const RW = RX1 - RX0;
+    // dollhouse base slab butted against room 1's (shared edge, never overlap)
+    root.add(mesh(roundedBox(RW + 0.2, 0.5, D + 0.8, 0.12), mat("#cdb08a", 0.9), RCX - 0.3, -0.26, CZ - 0.2));
+    const floorTex = woodFloorTexture(RW, D);
+    disposables.push(floorTex);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(RW, D), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.78 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(RCX, 0, 0);
+    floor.receiveShadow = true;
+    root.add(floor);
+    // west + north walls always; south wall + ceiling gate with the view
+    const raceStatic = new THREE.Group();
+    raceStatic.add(span2(RX0 - 0.4, RX0, 0, H, B - 0.4, F + 0.4, sideWallMat));
+    raceStatic.add(span2(RX0 - 0.35, -23.2, 0, H, B - 0.4, B, wallMat));
+    raceGated.add(span2(RX0 - 0.35, RX1, 0, H, F, F + 0.4, wallMat));
+    const trims: Array<{ depth: number; y0: number; y1: number; overhang: number; m: THREE.Material }> = [
+      { depth: 0.06, y0: 0, y1: 1.1, overhang: 0, m: wainscot },
+      { depth: 0.1, y0: 1.08, y1: 1.16, overhang: 0.02, m: trim },
+      { depth: 0.09, y0: 0, y1: 0.18, overhang: 0.01, m: wood },
+      { depth: 0.24, y0: H - 0.24, y1: H, overhang: 0.03, m: trim },
+    ];
+    for (const t of trims) {
+      raceStatic.add(span2(RX0 - 0.35, -23.2, t.y0, t.y1, B, B + t.depth, t.m));
+      raceStatic.add(span2(RX0, RX0 + t.depth, t.y0, t.y1, B + t.depth, F + 0.4 + t.overhang, t.m));
+      raceGated.add(span2(RX0 - 0.35, RX1, t.y0, t.y1, F - t.depth, F, t.m));
+    }
+    const batten = new THREE.BoxGeometry(0.06, 0.9, 0.03);
+    for (let x = RX0 + 0.75; x < RX1; x += 1.5) raceGated.add(mesh(batten, trim, x, 0.56, F - 0.07));
+    const battenW = new THREE.BoxGeometry(0.03, 0.9, 0.06);
+    for (let z = HALL.zMin + 0.75; z < HALL.zMax; z += 1.5) raceStatic.add(mesh(battenW, trim, RX0 + 0.07, 0.56, z));
+    const battenN = new THREE.BoxGeometry(0.06, 0.9, 0.03);
+    for (let x = RX0 + 0.75; x < -23.2; x += 1.5) raceStatic.add(mesh(battenN, trim, x, 0.56, B + 0.07));
+    const ceil2 = mesh(new THREE.BoxGeometry(RW + 0.2, 0.3, D + 0.8), mat("#f3ecdd", 1), RCX - 0.3, H + 0.15, CZ - 0.2);
+    ceil2.castShadow = false;
+    ceil2.receiveShadow = false;
+    raceGated.add(ceil2);
+    for (let x = RX0 + 4; x < RX1; x += 8) {
+      const beam = mesh(new THREE.BoxGeometry(0.28, 0.3, D), wood, x, H - 0.17, CZ);
+      beam.castShadow = false;
+      beam.receiveShadow = false;
+      raceGated.add(beam);
+    }
+    // one window on the north wall, same dress as the rest
+    {
+      const g = new THREE.Group();
+      g.add(mesh(roundedBox(3.7, 2.7, 0.2, 0.06), mat("#ffffff", 0.6), 0, 0, 0));
+      const viewTex = windowViewTexture();
+      disposables.push(viewTex);
+      const pane = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 2.3), new THREE.MeshBasicMaterial({ map: viewTex }));
+      pane.position.set(0, 0, 0.11);
+      g.add(pane);
+      g.add(mesh(roundedBox(4.0, 0.12, 0.4, 0.04), mat("#fffaf2", 0.7), 0, -1.4, 0.15));
+      for (const side of [-1, 1]) {
+        const curtain = mesh(roundedBox(0.55, 3.1, 0.14, 0.07), mat("#ffd6e0", 0.95), side * 2.15, -0.05, 0.21);
+        curtain.scale.x = 0.9;
+        g.add(curtain);
+      }
+      g.position.set(RCX, 6.8, B + 0.05);
+      raceStatic.add(g);
+    }
+    root.add(raceStatic, raceGated);
+    freeze(raceStatic);
+    freeze(raceGated);
+
+    // ── the twisty two-lane ribbon, painted on the boards ──
+    const trackTex = trackTexture();
+    disposables.push(trackTex);
+    const track = new THREE.Mesh(
+      new THREE.PlaneGeometry(TRACK_PLANE.x1 - TRACK_PLANE.x0, TRACK_PLANE.z1 - TRACK_PLANE.z0),
+      new THREE.MeshStandardMaterial({ map: trackTex, roughness: 0.7 })
+    );
+    track.rotation.x = -Math.PI / 2;
+    track.position.set(TRACK.cx, 0.02, TRACK.cz);
+    track.receiveShadow = true;
+    root.add(track);
+
+    // ── jump ramps from RAMPS (origin = low edge, ascent along dx/dz) ──
+    const chevTex = chevronTexture();
+    disposables.push(chevTex);
+    const chevMat = new THREE.MeshStandardMaterial({ map: chevTex, roughness: 0.7 });
+    const skirtMat = mat("#f4f1ea", 0.6);
+    const wedgeMat = mat("#3d3347", 0.7);
+    for (const r of RAMPS) {
+      const ramp = new THREE.Group();
+      const tri = new THREE.Shape();
+      tri.moveTo(0, 0);
+      tri.lineTo(r.length, 0);
+      tri.lineTo(r.length, r.height);
+      tri.closePath();
+      const wedgeGeo = new THREE.ExtrudeGeometry(tri, { depth: r.width, bevelEnabled: false });
+      wedgeGeo.translate(0, 0, -r.width / 2);
+      ramp.add(mesh(wedgeGeo, wedgeMat, 0, 0, 0, true));
+      const SL = Math.hypot(r.length, r.height);
+      const ang = Math.atan2(r.height, r.length);
+      const plate = mesh(new THREE.BoxGeometry(SL, 0.07, r.width - 0.3), chevMat, r.length / 2 - Math.sin(ang) * 0.045, r.height / 2 + Math.cos(ang) * 0.045, 0, true);
+      plate.rotation.z = ang;
+      ramp.add(plate);
+      for (const s of [-1, 1]) {
+        const strip = mesh(new THREE.BoxGeometry(SL, 0.075, 0.16), skirtMat, r.length / 2 - Math.sin(ang) * 0.055, r.height / 2 + Math.cos(ang) * 0.055, s * (r.width / 2 - 0.15), true);
+        strip.rotation.z = ang;
+        ramp.add(strip);
+      }
+      ramp.position.set(r.x, 0, r.z);
+      ramp.rotation.y = Math.atan2(r.dx, r.dz) - Math.PI / 2;
+      root.add(ramp);
+      freeze(ramp);
+    }
+
+    // ── racing props only: tire stacks, cones, floodlights ──
+    // (No stands, no arch gates — the circuit stays clean.)
+    {
+      const gear = new THREE.Group();
+      const tireMat = mat("#26232b", 0.9);
+      for (const [tx, tz] of [[-56, -1], [-66, 3], [-72, 1], [-48, 2]] as const) {
+        gear.add(mesh(cylinder(0.5, 0.5, 0.28, 18), tireMat, tx, 0.14, tz, true));
+        gear.add(mesh(cylinder(0.5, 0.5, 0.28, 18), tireMat, tx, 0.42, tz, true));
+        gear.add(mesh(cylinder(0.45, 0.45, 0.28, 18), mat("#f4f1ea", 0.6), tx, 0.7, tz, true));
+      }
+      for (const [cx, cz] of [[-36, 17.4], [-58, 17.5], [-78, 8], [-95, -10], [-52, -17], [-31, -13]] as const) {
+        gear.add(mesh(new THREE.ConeGeometry(0.22, 0.5, 12), mat("#e76f51", 0.7), cx, 0.25, cz, true));
+        gear.add(mesh(roundedBox(0.36, 0.05, 0.36, 0.02), mat("#f4f1ea", 0.7), cx, 0.025, cz));
+      }
+      for (const [fx, fz] of [[-96, 12], [-96, -12], [-28, 15.5], [-28, -15.5]] as const) {
+        gear.add(mesh(cylinder(0.12, 0.16, 5, 10), mat("#3b3034", 0.55), fx, 2.5, fz, true));
+        const head = mesh(roundedBox(0.8, 0.4, 0.35, 0.05), mat("#3b3034", 0.55), fx, 5.1, fz, true);
+        head.rotation.y = Math.atan2(TRACK.cx - fx, TRACK.cz - fz);
+        gear.add(head);
+        const lampPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.25), new THREE.MeshBasicMaterial({ color: "#fff6d8" }));
+        lampPlane.position.set(fx, 5.1, fz);
+        lampPlane.rotation.y = Math.atan2(TRACK.cx - fx, TRACK.cz - fz);
+        lampPlane.translateZ(0.19);
+        gear.add(lampPlane);
+        const glow = glowSprite("#ffedb0", 2.2, 0.5);
+        glow.position.set(fx, 5.1, fz);
+        gear.add(glow);
+      }
+      root.add(gear);
+      freeze(gear);
+    }
   }
 
   // ───────────────────────── windows + light beams ─────────────────────────
@@ -1045,6 +1241,7 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
       if (inside === enclosureOn) return;
       enclosureOn = inside;
       enclosure.visible = inside;
+      raceGated.visible = inside;
     },
     dispose: () => {
       for (const d of disposables) d.dispose();

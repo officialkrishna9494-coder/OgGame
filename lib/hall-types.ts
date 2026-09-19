@@ -206,6 +206,8 @@ export interface CartState {
   color: string;
   /** turbo exhaust 0…1, relayed by the driver so every screen shows the fire */
   boost?: number;
+  /** height above the floor (ramp rides + jump air), relayed like speed */
+  y: number;
 }
 
 export const IDLE_CONTEXT: ContextState = {

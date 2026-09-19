@@ -9,7 +9,7 @@ import * as THREE from "three";
 import type { BallState, CartState, ContextState, DodgeState, GameState, HairstyleId, OutfitId, PlayerState, RoomConfig, RpsState, SosState, TvState } from "../lib/hall-types";
 import { DODGE_LIVE_MS, DODGE_SHIELD_MS, IDLE_CONTEXT, resolveHairstyle } from "../lib/hall-types";
 import { ejectBall, handPoint, PICKUP_RADIUS, reachField, stepBall, TOUCH_FLOOR, TOUCH_SOLID, TOUCH_WALL } from "../lib/ball-physics";
-import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, inCourt } from "../lib/hall-layout";
+import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, RACE, clampToRooms, inCourt, rampGroundAt, resolveRamp, TRACK_GATES } from "../lib/hall-layout";
 import { buildEnvironment, type CourtMode } from "./scene/environment";
 import { buildOutfit, disposeOutfit, OUTFIT_LABEL_Y, poseOutfit, setHairstyle, tintOutfit, type OutfitRig } from "./scene/outfits";
 import { buildCart, cartSeatOffset, disposeCart, poseCart, CART_RIDER_Y, type CartRig } from "./scene/carts";
@@ -19,7 +19,7 @@ import { joyState, resetJoy } from "../lib/joy-state";
 import { drivePad } from "../lib/drive-pad";
 import { cycleViewMode, isFirstPerson, viewState } from "../lib/view-state";
 import { resetTurbo, turboState } from "../lib/turbo-state";
-import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
+import { COLLIDERS, SOFA_SEATS } from "../lib/room-defaults";
 
 export interface DodgeThrow {
   x: number;
@@ -52,7 +52,7 @@ interface Props {
   onContext: (c: ContextState) => void;
   onCollect: (starId: string) => void;
   onHit: () => void;
-  onCartDrive: (c: { id: string; x: number; z: number; facing: number; speed: number; boost: number }) => void;
+  onCartDrive: (c: { id: string; x: number; z: number; facing: number; speed: number; boost: number; y: number }) => void;
   onDodgePickup: (ballId: string) => void;
   onDodgeThrow: (ballId: string, b: DodgeThrow) => void;
   onDodgeSpend: (ballId: string, rev: number) => void;
@@ -441,7 +441,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       const inv = cam.matrixWorldInverse;
       const p = new THREE.Vector3();
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-      for (const x of [HALL.xMin - 1, HALL.xMax + 1])
+      // both rooms under one sun (raceway annex included) — texel + bias below
+      // re-derive from the wider box so nothing shimmers
+      for (const x of [RACE.xMin - 1, HALL.xMax + 1])
         for (const y of [0, HALL.wallHeight])
           for (const z of [HALL.zMin - 1, HALL.zMax + 1]) {
             p.set(x, y, z).applyMatrix4(inv);
@@ -994,7 +996,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     // The driver's client owns its cart (server relays + validates); parked
     // carts and rivals' carts ease toward the relayed snapshot every frame.
     let myCartId: string | null = null;
-    const cartSim = new Map<string, { x: number; z: number; facing: number; speed: number; steer: number; boost: number }>();
+    const cartSim = new Map<string, { x: number; z: number; facing: number; speed: number; steer: number; boost: number; y: number; vy: number }>();
+    // raceway lap tracker (my driven cart only): gates in travel order, the
+    // clock starts crossing the line, wrong-way resets with a cooldown
+    let cartLap = { next: 1, t0: 0, best: 0, wrongAt: 0, armed: -1 };
     // turbo tank + the smoothed boost that actually drives the physics
     let turbo = TURBO_TANK;
     let turboBlend = 0;
@@ -1014,7 +1019,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         keys.delete(k);
         return;
       }
-      if (isTypingTarget(e) || (e.target as HTMLElement | null)?.closest('[role="dialog"]')) return;
+      // Dialog guard tolerates exotic targets (window/document have no
+      // .closest — without the second ?. they throw and eat the keystroke).
+      const dialogTarget = e.target as HTMLElement | null;
+      if (isTypingTarget(e) || (typeof dialogTarget?.closest === "function" && dialogTarget.closest('[role="dialog"]'))) return;
       // V — cycle the triple view: dollhouse follow → first-person → close
       // chase → follow … Modifiers excluded so shortcuts never flip it.
       if (k === "v" && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -1111,9 +1119,13 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           speed: 0,
           steer: 0,
           boost: 0,
+          y: s?.y ?? 0,
+          vy: 0,
         });
         // glide the hips into the seat instead of snapping across the gap
         enterTween = { x: me.x, z: me.z, at: performance.now() };
+        // fresh stopwatch for the raceway (first line-crossing starts it)
+        cartLap = { next: 1, t0: 0, best: 0, wrongAt: 0, armed: -1 };
       } else if (!serverCartId && myCartId) {
         // stepped out beside the seat
         const sim = cartSim.get(myCartId);
@@ -1137,7 +1149,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       // every cart gets a display sim (the driven one stays authoritative)
       for (const c of st.carts) {
         if (c.id === myCartId || cartSim.has(c.id)) continue;
-        cartSim.set(c.id, { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0, boost: c.boost ?? 0 });
+        cartSim.set(c.id, { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0, boost: c.boost ?? 0, y: c.y ?? 0, vy: 0 });
       }
       // ── input dir (camera looks -z, so screen-up = -z) ──
       let ix = 0;
@@ -1155,8 +1167,13 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       // lock at once, so a turn always bled speed. WASD and the arrow keys
       // are interchangeable: both feed ix / iz identically below. The mobile
       // car hub (drivePad) adds on top; every flag is false on desktop, so
-      // the keyboard path is untouched there.
-      const driveThrottle = Math.max(-1, Math.min(1, -iz + (drivePad.up ? 1 : 0) - (drivePad.down ? 1 : 0)));
+      // the keyboard path is untouched there. The round TURBO button carries
+      // its own `turbo` flag (not folded into `up`, so the two pedals never
+      // clobber each other): held TURBO implies forward drive — unless the
+      // driver is explicitly reversing, in which case the boost applies to
+      // the reverse instead of cancelling it.
+      const driveBase = Math.max(-1, Math.min(1, -iz + (drivePad.up ? 1 : 0) - (drivePad.down ? 1 : 0)));
+      const driveThrottle = Math.max(-1, Math.min(1, driveBase + (drivePad.turbo && driveBase > -0.5 ? 1 : 0)));
       const driveSteer = Math.max(-1, Math.min(1, ix + (drivePad.right ? 1 : 0) - (drivePad.left ? 1 : 0)));
       const len = Math.hypot(ix, iz);
       if (len > 1) {
@@ -1189,7 +1206,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         let sim = cartSim.get(myCartId);
         if (!sim) {
           const s = st.carts.find((c) => c.id === myCartId);
-          sim = { x: s?.x ?? me.x, z: s?.z ?? me.z, facing: s?.facing ?? me.facing, speed: 0, steer: 0, boost: 0 };
+          sim = { x: s?.x ?? me.x, z: s?.z ?? me.z, facing: s?.facing ?? me.facing, speed: 0, steer: 0, boost: 0, y: s?.y ?? 0, vy: 0 };
           cartSim.set(myCartId, sim);
         }
         // turbo scales BOTH the pull and the ceiling, so the extra speed
@@ -1264,24 +1281,56 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             bumped = true;
           }
         }
-        // walls
-        if (nx < HALL.xMin + 0.9 || nx > HALL.xMax - 0.9) {
-          nx = Math.max(HALL.xMin + 0.9, Math.min(HALL.xMax - 0.9, nx));
+        // jump ramps — below the surface is masonry (shove out with a scrub),
+        // on top or landing the heightfield carries the wheels (see below)
+        const rr = resolveRamp(nx, nz, sim.y, CART_RADIUS);
+        if (rr.hit) {
+          nx = rr.x;
+          nz = rr.z;
           bumped = true;
         }
-        if (nz < HALL.zMin + 0.9 || nz > HALL.zMax - 0.9) {
-          nz = Math.max(HALL.zMin + 0.9, Math.min(HALL.zMax - 0.9, nz));
-          bumped = true;
+        // walls
+        {
+          const cb = clampToRooms(nx, nz, CART_RADIUS);
+          if (cb.x !== nx || cb.z !== nz) bumped = true;
+          nx = cb.x;
+          nz = cb.z;
         }
         // one frame-rate-proof scrub per frame — a graze bleeds momentum,
         // but the throttle always stays alive
         if (bumped) sim.speed *= Math.exp(-6 * dt);
         sim.x = nx;
         sim.z = nz;
+        // vertical — ramps carry, lips launch, gravity rules the air
+        const ground = rampGroundAt(sim.x, sim.z);
+        if (sim.y <= ground + 0.02 && sim.vy <= 0) {
+          sim.y = ground;
+          sim.vy = 0;
+        } else {
+          if (sim.vy === 0) {
+            // lip exit, granted once: take-off speed scales with driving
+            // speed — crawl off and you dribble over the edge, arrive flat
+            // out (or on turbo) and you fly. The grade just climbed (sampled
+            // behind, since the ground ahead already fell away) converts
+            // forward speed into upward velocity; reversing never launches.
+            const fx = Math.sin(sim.facing);
+            const fz = Math.cos(sim.facing);
+            const hNear = rampGroundAt(sim.x - fx * 0.6, sim.z - fz * 0.6);
+            const hFar = rampGroundAt(sim.x - fx * 1.6, sim.z - fz * 1.6);
+            const grade = hNear - hFar;
+            sim.vy = grade > 0.02 ? Math.min(6, Math.max(0, sim.speed) * grade) : 0;
+          }
+          sim.vy -= 22 * dt;
+          sim.y += sim.vy * dt;
+          if (sim.y <= ground) {
+            sim.y = ground;
+            sim.vy = 0;
+          }
+        }
         // the rider glides with the seat — no walk, no gravity, no jump
         me.x = sim.x;
         me.z = sim.z;
-        me.y = CART_RIDER_Y;
+        me.y = sim.y + CART_RIDER_Y;
         me.vx = 0;
         me.vz = 0;
         me.vy = 0;
@@ -1298,6 +1347,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             facing: Math.round(sim.facing * 100) / 100,
             speed: Math.round(sim.speed * 100) / 100,
             boost: Math.round(turboBlend * 100) / 100,
+            y: Math.round(sim.y * 100) / 100,
           });
         }
       } else if (sitting) {
@@ -1388,8 +1438,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         }
         // ground support — the highest top underfoot close enough to stand
         // on, so jumps land ON low furniture instead of falling through it
-        // (and tiny curbs like the hearth step up with no hop at all)
-        let ground = 0;
+        // (and tiny curbs like the hearth step up with no hop at all).
+        // Raceway ramps join in via the heightfield (never as blockers).
+        let ground = rampGroundAt(me.x, me.z);
         for (const c of COLLIDERS) {
           const top = c.y1 ?? 0;
           if (top <= 0.001 || top > VAULT_MAX || top > me.y + STEP_KNEE) continue;
@@ -1432,12 +1483,24 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             me.z = cs.z + (dz / d) * minD;
           }
         }
+        // ramp masonry below the feet shoves back (ride the slope instead)
+        const prr = resolveRamp(me.x, me.z, me.y, 0.38);
+        if (prr.hit) {
+          me.x = prr.x;
+          me.z = prr.z;
+          me.vx *= 0.5;
+          me.vz *= 0.5;
+        }
       } else {
         me.vy = 0;
         me.grounded = true;
       }
-      me.x = Math.max(-HALL_BOUNDS.x, Math.min(HALL_BOUNDS.x, me.x));
-      me.z = Math.max(HALL_BOUNDS.zMin, Math.min(HALL_BOUNDS.zMax, me.z));
+      // both rooms + the door gap (never through the shared wall itself)
+      {
+        const cl = clampToRooms(me.x, me.z, 0.38);
+        me.x = cl.x;
+        me.z = cl.z;
+      }
 
       // ── ball: network is the source of truth for WHO holds it ──────────
       // Own socket id translates to "me" so held balls always resolve.
@@ -1779,11 +1842,13 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         const driving = !!driverCartId && !!driverSim;
         if (driving && driverSim) {
           // the rider sits ON the seat cushion, which is set back behind the
-          // car's origin — otherwise they perch on the steering column
+          // car's origin — otherwise they perch on the steering column.
+          // Height rides the kart (ramps + jump air), so seat and hips fly as
+          // one instead of the rider sinking out of a jumping car.
           cartSeatOffset(driverSim.facing, seatOff);
           const seatX = driverSim.x + seatOff.x;
           const seatZ = driverSim.z + seatOff.z;
-          g.position.set(seatX, CART_RIDER_Y, seatZ);
+          g.position.set(seatX, driverSim.y + CART_RIDER_Y, seatZ);
           g.rotation.y = driverSim.facing;
           // fresh hop-in: glide the hips from the door into the seat
           if (id === MY_ID && enterTween && performance.now() - enterTween.at < 350) {
@@ -1817,8 +1882,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         const hitStamp = selfStamp !== 0 ? selfStamp : (p.hitAt ?? 0);
         const hitK = hitStamp !== 0 && Date.now() - hitStamp < 2000 ? 1 - (Date.now() - hitStamp) / 2000 : 0;
         // perched sitters stand on the cushion edge (feet dangle); floor
-        // sitters sink into a deep kneel (see poseOutfit)
-        const baseY = driving ? CART_RIDER_Y : p.sitting ? (p.seat != null ? (SOFA_SEATS[p.seat]?.y ?? 0.55) - 0.635 : -0.38) : id === MY_ID ? me.y : 0;
+        // sitters sink into a deep kneel (see poseOutfit). Drivers add the
+        // kart's own height (ramps + air), so the hips stay glued to the seat
+        // through every jump — never sinking below a flying car.
+        const baseY = driving && driverSim ? driverSim.y + CART_RIDER_Y : p.sitting ? (p.seat != null ? (SOFA_SEATS[p.seat]?.y ?? 0.55) - 0.635 : -0.38) : id === MY_ID ? me.y : 0;
         g.position.y = baseY;
         poseOutfit(rig.outfit, dt, {
           speed,
@@ -1921,7 +1988,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         const rig = getCartRig(c.id, c.color);
         let sim = cartSim.get(c.id);
         if (!sim) {
-          sim = { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0, boost: c.boost ?? 0 };
+          sim = { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0, boost: c.boost ?? 0, y: c.y ?? 0, vy: 0 };
           cartSim.set(c.id, sim);
         }
         if (c.id !== myCartId) {
@@ -1932,6 +1999,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             sim.x = c.x;
             sim.z = c.z;
             sim.facing = c.facing;
+            sim.y = c.y ?? 0;
           } else {
             sim.x += (c.x - sim.x) * k;
             sim.z += (c.z - sim.z) * k;
@@ -1943,10 +2011,49 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           sim.speed += (c.speed - sim.speed) * k;
           sim.steer += (0 - sim.steer) * k;
           sim.boost += ((c.boost ?? 0) - sim.boost) * k;
+          // height rides the relay (ramps are static, so this is exact short
+          // of mid-air frames, which ease in within a beat or two)
+          sim.y += ((c.y ?? 0) - sim.y) * k;
+          sim.vy = 0;
         }
-        rig.group.position.set(sim.x, 0, sim.z);
+        rig.group.position.set(sim.x, sim.y, sim.z);
         rig.group.rotation.y = sim.facing;
         poseCart(rig, dt, { speed: sim.speed, steer: sim.steer, elapsed, boost: sim.boost });
+      }
+      // ── raceway laps (my driven cart only): gates in travel order, clock
+      // starts on the first line crossing, wrong-way resets with a cooldown ──
+      if (myCartId) {
+        const nowMs = Date.now();
+        let insideAny = false;
+        for (let i = 0; i < TRACK_GATES.length; i++) {
+          const gt = TRACK_GATES[i];
+          if (Math.hypot(me.x - gt.x, me.z - gt.z) > 4) continue;
+          insideAny = true;
+          // edge trigger: lingering inside one gate must not re-fire it
+          if (i === cartLap.armed) continue;
+          cartLap.armed = i;
+          if (i === 0) {
+            if (cartLap.next === TRACK_GATES.length && cartLap.t0 > 0) {
+              const t = (nowMs - cartLap.t0) / 1000;
+              const best = cartLap.best === 0 || t < cartLap.best;
+              if (best) cartLap.best = t;
+              popups.push({
+                sp: makePopup(best ? `LAP ${t.toFixed(1)} · BEST!` : `LAP ${t.toFixed(1)}`, best ? "#ffd166" : "#8ce8c0"),
+                id: MY_ID,
+                born: elapsed,
+              });
+            }
+            cartLap.next = 1;
+            cartLap.t0 = nowMs;
+          } else if (i === cartLap.next) {
+            cartLap.next++;
+          } else if (cartLap.next > 1 && nowMs > cartLap.wrongAt) {
+            cartLap.wrongAt = nowMs + 3000;
+            cartLap.next = 1;
+            popups.push({ sp: makePopup("WRONG WAY", "#ff8a8a"), id: MY_ID, born: elapsed });
+          }
+        }
+        if (!insideAny) cartLap.armed = -1;
       }
       // ── ball mesh: held balls render from synced player positions ──
       // (never from fragile local adoption chains — always visible)
@@ -2138,13 +2245,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       } else if (chaseCam) {
         // close chase — hover just behind the back, nearer than max zoom-in
         // ever reaches, full body in frame with the road ahead up top.
-        // Clamped inside the room so the new front/left walls never swallow
-        // the lens (it slides along them instead, like a real camera rig).
-        desired.set(
-          Math.max(HALL.xMin + 0.6, Math.min(HALL.xMax - 0.6, px - fx * 4.0)),
-          py + 2.7,
-          Math.max(HALL.zMin + 0.6, Math.min(HALL.zMax - 0.6, pz - fz * 4.0))
-        );
+        // Clamped into whichever room you're in (door gap included) so the
+        // lens slides along walls instead of going blind behind them.
+        const chaseXZ = clampToRooms(px - fx * 4.0, pz - fz * 4.0, 0.5);
+        desired.set(chaseXZ.x, py + 2.7, chaseXZ.z);
         camera.position.lerp(desired, Math.min(1, dt * 6));
         const k = Math.min(1, dt * 6);
         lookSm.x += (px + fx * 6 - lookSm.x) * k;

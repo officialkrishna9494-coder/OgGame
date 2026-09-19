@@ -7,7 +7,7 @@
 // the ball and the 3D scene can never disagree about where things are.
 
 import type { RoomConfig } from "./hall-types";
-import { BALL_SPAWN as LAYOUT_BALL_SPAWN, HALL, LOUNGE, PROPS, WALL_ART } from "./hall-layout";
+import { BALL_SPAWN as LAYOUT_BALL_SPAWN, HALL, LOUNGE, PROPS, RACE, WALL_ART } from "./hall-layout";
 
 export const DEFAULT_ROOM: RoomConfig = {
   name: "Cozy Hall",
@@ -115,8 +115,10 @@ export const SOLIDS: Solid[] = PROPS.map((p): Solid =>
 );
 
 // Where the ball can travel (open camera side included) and where it rests
-// when the hall first wakes up — clear of every solid above.
-export const BALL_BOUNDS = { xMin: HALL.xMin + 0.6, xMax: HALL.xMax - 0.6, zMin: HALL.zMin + 0.8, zMax: HALL.zMax - 1 };
+// when the hall first wakes up — clear of every solid above. Spans both rooms
+// so throws through the big door keep flying (dodgeball stays court-side via
+// its own referee clamps).
+export const BALL_BOUNDS = { xMin: RACE.xMin + 0.6, xMax: HALL.xMax - 0.6, zMin: HALL.zMin + 0.8, zMax: HALL.zMax - 1 };
 export const BALL_SPAWN = LAYOUT_BALL_SPAWN;
 
 // Where admin-added frames land by default (the right half of the back wall).

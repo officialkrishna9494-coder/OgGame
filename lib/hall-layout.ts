@@ -218,6 +218,20 @@ export const PROPS: Prop[] = [
   { shape: "box", x: GARDEN.bench.x, z: GARDEN.bench.z, hx: 1.25, hz: 0.38, y1: 0.95 },
   ...PLANTS.map((p): Prop => ({ shape: "cyl", x: p.x, z: p.z, r: 0.62 * p.s, y1: 1.75 * p.s })),
   ...FLOOR_LAMPS.flatMap((l) => lampProps(l.x, l.z)),
+
+  // raceway annex (big room west, x −101…−23): tire stacks, cones and
+  // floodlight poles only — a clean professional paddock. Ramps live in
+  // RAMPS (heightfield), never here — see below. Every prop below is placed
+  // clear of the TRACK_POINTS centerline (see tests/raceway.test.mts).
+  ...[[-56, -1], [-66, 3], [-72, 1], [-48, 2]].map(
+    ([x, z]): Prop => ({ shape: "cyl", x, z, r: 0.55, y1: 0.95 })
+  ),
+  ...[[-36, 17.4], [-58, 17.5], [-78, 8], [-95, -10], [-52, -17], [-31, -13]].map(
+    ([x, z]): Prop => ({ shape: "cyl", x, z, r: 0.25, y1: 0.55 })
+  ),
+  ...[[-96, 12], [-96, -12], [-28, 15.5], [-28, -15.5]].map(
+    ([x, z]): Prop => ({ shape: "cyl", x, z, r: 0.2, y1: 5.2 })
+  ),
 ];
 
 // ─── contextual zones (ACT / E) — enter radius, exit radius (hysteresis) ────
@@ -233,4 +247,193 @@ export const ZONES = {
 
 export function inCourt(x: number, z: number, margin = 0): boolean {
   return x > COURT.xMin + margin && x < COURT.xMax - margin && z > COURT.zMin + margin && z < COURT.zMax - margin;
+}
+
+// ─── raceway annex (big room west, through the big door) ────────────────────
+// 78 × 36 due west of the hall (x −101…−23, same z span) — room for a twisty
+// multi-turn circuit, not just an oval. The shared wall (x = -23) opens at
+// the big door gap on the front (camera) half; everywhere else it blocks
+// players, carts and balls alike.
+// Ramps are NOT colliders — karts and feet ride the heightfield instead, so
+// anything can launch off them. The track is a clean two-lane ribbon with
+// racing props only (tires, cones, floodlights) — no stands, no arch gates.
+export const RACE = { xMin: -101, xMax: -23, zMin: -18, zMax: 18 };
+
+/** big opening in the shared wall, front (camera) half (room faces x = -23) */
+export const DOOR_GAP = { z0: 7, z1: 13, h: 4.2 };
+
+export interface RampDef {
+  /** low-edge origin; ascent runs (dx, dz) for `length` up to `height` */
+  x: number;
+  z: number;
+  dx: number;
+  dz: number;
+  length: number;
+  width: number;
+  height: number;
+}
+
+export const RAMPS: RampDef[] = [
+  // south S, launches west-southwest down the home weave
+  { x: -47, z: 12.1, dx: -0.958, dz: -0.287, length: 4.5, width: 3.2, height: 1.25 },
+  // north S, launches east-northeast toward the final turns
+  { x: -56, z: -9.4, dx: 0.923, dz: 0.385, length: 4.5, width: 3.2, height: 1.25 },
+  // west entry, launches south-southwest into the hairpin
+  { x: -89.7, z: 9.8, dx: -0.6, dz: -0.8, length: 4.5, width: 3.2, height: 1.25 },
+  // east return, launches south-southeast past the big door
+  { x: -35.6, z: -5.6, dx: 0.707, dz: 0.707, length: 4.5, width: 3.2, height: 1.25 },
+];
+
+/** professional two-lane ribbon */
+export const TRACK_WIDTH = 7;
+export const TRACK_LANE = TRACK_WIDTH / 2;
+
+/**
+ * S-weave circuit centerline in TRAVEL order (closed loop): an S-weave down
+ * the south side → far-west hairpin → double-S through the north → eastern
+ * return past the big door. Every ramp sits mid-segment with the segment's
+ * exact direction, so launches fire straight down the racing line.
+ */
+export const TRACK_POINTS: Array<[number, number]> = [
+  [-34, 10],
+  [-44, 13],
+  [-54, 10],
+  [-64, 13],
+  [-76, 14],
+  [-88, 12],
+  [-94, 4],
+  [-90, -5],
+  [-80, -9],
+  [-70, -5],
+  [-60, -11],
+  [-48, -6],
+  [-38, -8],
+  [-30, 0],
+];
+
+/** track paint plane: 74 × 32 boards centred on the room, 2 m wood apron */
+export const TRACK_PLANE = { x0: -99, x1: -25, z0: -16, z1: 16 };
+export const TRACK = {
+  cx: (TRACK_PLANE.x0 + TRACK_PLANE.x1) / 2,
+  cz: (TRACK_PLANE.z0 + TRACK_PLANE.z1) / 2,
+  width: TRACK_WIDTH,
+  laneW: TRACK_LANE,
+};
+
+/**
+ * Sample the closed centerline with Catmull-Rom (uniform, centripetal-safe
+ * for our gentle corners). One source for the paint texture, the lap-gate
+ * sanity checks and the prop-clearance tests — move the track here, not in
+ * the scene builders.
+ */
+export function sampleTrackCenterline(samplesPerSpan = 16): Array<{ x: number; z: number }> {
+  const pts = TRACK_POINTS;
+  const n = pts.length;
+  const out: Array<{ x: number; z: number }> = [];
+  const get = (i: number): [number, number] => pts[((i % n) + n) % n];
+  for (let i = 0; i < n; i++) {
+    const p0 = get(i - 1);
+    const p1 = get(i);
+    const p2 = get(i + 1);
+    const p3 = get(i + 2);
+    for (let k = 0; k < samplesPerSpan; k++) {
+      const t = k / samplesPerSpan;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      // standard Catmull-Rom (0.5 blend), per axis
+      const x =
+        0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
+      const z =
+        0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
+      out.push({ x, z });
+    }
+  }
+  return out;
+}
+
+/** lap gates in travel order — first doubles as start/finish */
+export const TRACK_GATES = [
+  { x: -39, z: 11.5 },
+  { x: -59, z: 11.5 },
+  { x: -91, z: 8 },
+  { x: -85, z: -7 },
+  { x: -65, z: -8 },
+  { x: -43, z: -7 },
+  { x: -32, z: 5 },
+];
+
+/** highest ramp surface under (x, z) — 0 on open floor */
+export function rampGroundAt(x: number, z: number): number {
+  let g = 0;
+  for (const r of RAMPS) {
+    const rx = x - r.x;
+    const rz = z - r.z;
+    const s = rx * r.dx + rz * r.dz;
+    const lat = Math.abs(rx * -r.dz + rz * r.dx);
+    if (s >= 0 && s <= r.length && lat <= r.width / 2) {
+      const h = r.height * (s / r.length);
+      if (h > g) g = h;
+    }
+  }
+  return g;
+}
+
+/**
+ * Shove a circle (body radius r, feet at y) out of ramp masonry it is BELOW.
+ * On top of a ramp (or landing on one) there is no hit — the heightfield
+ * carries it. Returns the corrected position + whether it bumped.
+ */
+export function resolveRamp(
+  x: number,
+  z: number,
+  y: number,
+  r: number
+): { x: number; z: number; hit: boolean } {
+  for (const rmp of RAMPS) {
+    const rx = x - rmp.x;
+    const rz = z - rmp.z;
+    const s = rx * rmp.dx + rz * rmp.dz;
+    const ls = rx * -rmp.dz + rz * rmp.dx;
+    const half = rmp.width / 2 + r;
+    if (s > -r && s < rmp.length + r && Math.abs(ls) < half) {
+      const h = rmp.height * Math.max(0, Math.min(1, s / rmp.length));
+      if (y + 0.3 >= h) continue; // riding or landing — no wall here
+      // below the surface: exit via the back or the nearer side (never the lip)
+      const backD = s + r + 0.05;
+      const sideD = half - Math.abs(ls) + 0.05;
+      if (backD <= sideD) {
+        const ns = -r - 0.05;
+        return { x: rmp.x + rmp.dx * ns + -rmp.dz * ls, z: rmp.z + rmp.dz * ns + rmp.dx * ls, hit: true };
+      }
+      const nls = (ls >= 0 ? 1 : -1) * (half + 0.05);
+      return { x: rmp.x + rmp.dx * s + -rmp.dz * nls, z: rmp.z + rmp.dz * s + rmp.dx * nls, hit: true };
+    }
+  }
+  return { x, z, hit: false };
+}
+
+/** both rooms + the doorway band count as floor (walls handled by callers) */
+export function walkableXZ(x: number, z: number, r: number): boolean {
+  if (x >= HALL.xMin + r && x <= HALL.xMax - r && z >= HALL.zMin + r && z <= HALL.zMax - r) return true;
+  if (x >= RACE.xMin + r && x <= RACE.xMax - r && z >= RACE.zMin + r && z <= RACE.zMax - r) return true;
+  return x > RACE.xMax - 0.8 - r && x < HALL.xMin + 0.8 + r && z > DOOR_GAP.z0 + r && z < DOOR_GAP.z1 - r;
+}
+
+/** clamp a circle into the two rooms, slipping through the door gap */
+export function clampToRooms(x: number, z: number, r: number): { x: number; z: number } {
+  const zMin = HALL.zMin + 0.6;
+  const zMax = HALL.zMax - 0.8;
+  z = Math.max(zMin, Math.min(zMax, z));
+  const face = HALL.xMin + r; // room-1 side of the shared face
+  const back = RACE.xMax - 0.4 - r; // room-2 side of the masonry
+  const doorway = z > DOOR_GAP.z0 + r && z < DOOR_GAP.z1 - r;
+  if (x >= face) {
+    x = Math.min(HALL.xMax - 0.4, x); // room 1 (or leaning on its side)
+  } else if (x > back) {
+    // inside the masonry band: the doorway keeps you, the wall pushes east
+    if (!doorway) x = face;
+  } else {
+    x = Math.max(RACE.xMin + 0.4, x); // room 2, already past the wall
+  }
+  return { x, z };
 }
