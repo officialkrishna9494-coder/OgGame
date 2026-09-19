@@ -16,6 +16,7 @@ import { buildCart, cartSeatOffset, disposeCart, poseCart, CART_RIDER_Y, type Ca
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
+import { resetTurbo, turboState } from "../lib/turbo-state";
 import { COLLIDERS, HALL_BOUNDS, SOFA_SEATS } from "../lib/room-defaults";
 
 export interface DodgeThrow {
@@ -49,7 +50,7 @@ interface Props {
   onContext: (c: ContextState) => void;
   onCollect: (starId: string) => void;
   onHit: () => void;
-  onCartDrive: (c: { id: string; x: number; z: number; facing: number; speed: number }) => void;
+  onCartDrive: (c: { id: string; x: number; z: number; facing: number; speed: number; boost: number }) => void;
   onDodgePickup: (ballId: string) => void;
   onDodgeThrow: (ballId: string, b: DodgeThrow) => void;
   onDodgeSpend: (ballId: string, rev: number) => void;
@@ -363,6 +364,16 @@ const CART_REV = -2.5;
 const CART_DRAG = 1.4;
 const CART_TURN = 2.1;
 const CART_RADIUS = 0.8;
+
+// turbo (spacebar while driving) — a 5 s tank of boost that refills in 10 s,
+// i.e. 0.5 s of boost banked per second. An early release therefore just tops
+// the remainder up at that same rate: hold 3 s, keep 2 s, and those 2 s come
+// back over 4 s. Top speed and acceleration both scale, so the speed climbs
+// through the TURBO_RAMP ease rather than snapping to 2.5×.
+const TURBO_TANK = 5; // seconds of boost in a full tank
+const TURBO_REFILL = 10; // seconds to bank a full tank from empty
+const TURBO_MUL = 2.5; // top-speed / acceleration multiplier while boosting
+const TURBO_RAMP = 3.5; // how fast the boost eases in and out
 
 export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySocketId, players, ball, room, tv, game, rps, sos, dodge, carts, serverOffset, onMove, onBall, onNear, onContext, onCollect, onHit, onCartDrive, onDodgePickup, onDodgeThrow, onDodgeSpend, onDodgeHit }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -979,7 +990,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     // The driver's client owns its cart (server relays + validates); parked
     // carts and rivals' carts ease toward the relayed snapshot every frame.
     let myCartId: string | null = null;
-    const cartSim = new Map<string, { x: number; z: number; facing: number; speed: number; steer: number }>();
+    const cartSim = new Map<string, { x: number; z: number; facing: number; speed: number; steer: number; boost: number }>();
+    // turbo tank + the smoothed boost that actually drives the physics
+    let turbo = TURBO_TANK;
+    let turboBlend = 0;
     let lastNearCart: string | null = null;
     let lastCartDriveSent = 0;
     let enterTween: { x: number; z: number; at: number } | null = null;
@@ -1084,6 +1098,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           facing: s?.facing ?? me.facing,
           speed: 0,
           steer: 0,
+          boost: 0,
         });
         // glide the hips into the seat instead of snapping across the gap
         enterTween = { x: me.x, z: me.z, at: performance.now() };
@@ -1110,7 +1125,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       // every cart gets a display sim (the driven one stays authoritative)
       for (const c of st.carts) {
         if (c.id === myCartId || cartSim.has(c.id)) continue;
-        cartSim.set(c.id, { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0 });
+        cartSim.set(c.id, { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0, boost: c.boost ?? 0 });
       }
       // ── input dir (camera looks -z, so screen-up = -z) ──
       let ix = 0;
@@ -1138,21 +1153,39 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       const sofaMode = sitting && st.players[MY_ID]?.seatMode === "sofa";
       let mySeat = st.players[MY_ID]?.seat ?? null;
 
+      // ── turbo: SPACE while driving (the on-screen gauge doubles as the
+      // boost button on touch, where there is no spacebar). The tank drains
+      // while boosting and banks back at a fixed 0.5 s of boost per second,
+      // so a partial hold simply tops up its remainder on the same clock.
+      const boosting = myCartId !== null && (keys.has(" ") || turboState.held) && turbo > 0.001;
+      turbo = boosting
+        ? Math.max(0, turbo - dt)
+        : Math.min(TURBO_TANK, turbo + dt * (TURBO_TANK / TURBO_REFILL));
+      turboBlend += ((boosting ? 1 : 0) - turboBlend) * Math.min(1, dt * TURBO_RAMP);
+      turboState.driving = myCartId !== null;
+      turboState.level = turbo / TURBO_TANK;
+      turboState.active = turboBlend > 0.02;
+
       // driving — the same sticks steer the cart instead of the feet
       // (screen-up = forward), so the mobile joystick drives with no new UI
       if (myCartId) {
         let sim = cartSim.get(myCartId);
         if (!sim) {
           const s = st.carts.find((c) => c.id === myCartId);
-          sim = { x: s?.x ?? me.x, z: s?.z ?? me.z, facing: s?.facing ?? me.facing, speed: 0, steer: 0 };
+          sim = { x: s?.x ?? me.x, z: s?.z ?? me.z, facing: s?.facing ?? me.facing, speed: 0, steer: 0, boost: 0 };
           cartSim.set(myCartId, sim);
         }
-        sim.speed += driveThrottle * CART_ACCEL * dt;
+        // turbo scales BOTH the pull and the ceiling, so the extra speed
+        // arrives as a smooth climb through the boost ramp and then coasts
+        // back down under the normal drag instead of snapping off.
+        const boost = 1 + (TURBO_MUL - 1) * turboBlend;
+        sim.speed += driveThrottle * CART_ACCEL * boost * dt;
         // drag applied exactly once per frame (exponential → frame-rate-proof;
         // the old `speed -= speed*DRAG*dt` plus collider scrubs fought it)
         sim.speed *= Math.exp(-CART_DRAG * dt);
         if (Math.abs(driveThrottle) < 0.05 && Math.abs(sim.speed) < 0.35) sim.speed = 0;
-        sim.speed = Math.max(CART_REV, Math.min(CART_MAX, sim.speed));
+        sim.speed = Math.max(CART_REV, Math.min(CART_MAX * boost, sim.speed));
+        sim.boost = turboBlend;
         // The wheel bites harder the faster you roll, but never goes fully
         // dead: the old /2.5 ramp gave ZERO authority below ~0.55 m/s, so a
         // kart nudged into furniture couldn't turn its way free. A small floor
@@ -1247,6 +1280,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             z: Math.round(sim.z * 100) / 100,
             facing: Math.round(sim.facing * 100) / 100,
             speed: Math.round(sim.speed * 100) / 100,
+            boost: Math.round(turboBlend * 100) / 100,
           });
         }
       } else if (sitting) {
@@ -1838,7 +1872,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         const rig = getCartRig(c.id, c.color);
         let sim = cartSim.get(c.id);
         if (!sim) {
-          sim = { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0 };
+          sim = { x: c.x, z: c.z, facing: c.facing, speed: 0, steer: 0, boost: c.boost ?? 0 };
           cartSim.set(c.id, sim);
         }
         if (c.id !== myCartId) {
@@ -1859,10 +1893,11 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           }
           sim.speed += (c.speed - sim.speed) * k;
           sim.steer += (0 - sim.steer) * k;
+          sim.boost += ((c.boost ?? 0) - sim.boost) * k;
         }
         rig.group.position.set(sim.x, 0, sim.z);
         rig.group.rotation.y = sim.facing;
-        poseCart(rig, dt, { speed: sim.speed, steer: sim.steer, elapsed });
+        poseCart(rig, dt, { speed: sim.speed, steer: sim.steer, elapsed, boost: sim.boost });
       }
       // ── ball mesh: held balls render from synced player positions ──
       // (never from fragile local adoption chains — always visible)
@@ -2027,7 +2062,6 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
 
       // ── camera follow: both the position AND the gaze point are damped,
       // so the frame glides instead of shaking ──
-      (window as unknown as { __hall?: unknown }).__hall = { me: { x: me.x, z: me.z, facing: me.facing }, myCartId, carts: st.carts };
       const tx = me.x * 0.72;
       const tz = me.z * 0.7 + 2.4;
       desired.set(tx, camDist * 0.64, tz + camDist * 0.6);
@@ -2266,6 +2300,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       hallToss.fn = null;
       hallJump.fn = null;
       promptAnchor.key = null;
+      resetTurbo();
       window.clearInterval(roomTimer);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("keydown", kd);

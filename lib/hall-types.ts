@@ -204,6 +204,8 @@ export interface CartState {
   /** socket id of the driver, null when parked */
   driverId: string | null;
   color: string;
+  /** turbo exhaust 0…1, relayed by the driver so every screen shows the fire */
+  boost?: number;
 }
 
 export const IDLE_CONTEXT: ContextState = {

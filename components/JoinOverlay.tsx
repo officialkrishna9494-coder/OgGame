@@ -61,7 +61,7 @@ export default function JoinOverlay({ roomName, tagline, onJoin }: Props) {
         <p className="mt-3 text-[11px] leading-relaxed text-[#a99cbb]">
           WASD / arrows to wander · space to hop · E to interact
           <br />
-          hop in a kart with E, then the same keys drive it
+          hop in a kart with E, then the same keys drive it · space for turbo
           <br />
           on mobile: joystick to move, hop to jump, ACT to interact
         </p>

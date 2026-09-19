@@ -341,6 +341,7 @@ app.prepare().then(() => {
       if (cart.driverId || cartDrivenBy(socket.id)) return; // taken / already driving
       cart.driverId = socket.id;
       cart.speed = 0;
+      cart.boost = 0;
       players.set(socket.id, { ...cur, cartId: cart.id, sitting: false, seat: null, seatMode: null });
       io.to("hall").emit("hall:toast", { text: `${cur.name} hopped in a cart!`, icon: "drive" });
       dirty = true;
@@ -352,6 +353,8 @@ app.prepare().then(() => {
       if (!cart || !cur) return;
       cart.driverId = null;
       cart.speed = 0;
+      // kill the exhaust too, or an emptied car keeps flaming on other screens
+      cart.boost = 0;
       players.set(socket.id, { ...cur, cartId: null });
       dirty = true;
     });
@@ -363,7 +366,11 @@ app.prepare().then(() => {
       cart.x = Math.max(H.xMin + 0.8, Math.min(H.xMax - 0.8, Number(d.x) || 0));
       cart.z = Math.max(H.zMin + 0.8, Math.min(H.zMax - 0.8, Number(d.z) || 0));
       cart.facing = Number(d.facing) || 0;
-      cart.speed = Math.max(-3, Math.min(7, Number(d.speed) || 0));
+      // 17 ≈ CART_MAX (6.5) × TURBO_MUL (2.5) — the clamp must clear the boost
+      // or every other screen would render a noticeably slower car
+      cart.speed = Math.max(-3, Math.min(17, Number(d.speed) || 0));
+      // 0…1 turbo blend: drives the exhaust flames on every other screen
+      cart.boost = Math.max(0, Math.min(1, Number(d.boost) || 0));
       dirty = true;
     });
 
@@ -626,6 +633,7 @@ app.prepare().then(() => {
       if (cart) {
         cart.driverId = null;
         cart.speed = 0;
+        cart.boost = 0;
       }
       applyDodge(io, dodgeRef.leave(dodge, socket.id, leaving ? { x: leaving.x, z: leaving.z } : null, Date.now()));
       if (ball.holderId === socket.id) {

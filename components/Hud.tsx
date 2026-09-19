@@ -22,6 +22,7 @@ import { Icon, isIconName, type IconName } from "./icons";
 import { hallJump } from "./HallScene";
 import InteractPrompt, { HoldRing, KeyCap } from "./InteractPrompt";
 import Joystick from "./Joystick";
+import TurboGauge from "./TurboGauge";
 
 interface Props {
   roomName: string;
@@ -109,6 +110,7 @@ export default function Hud(p: Props) {
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between">
       <InteractPrompt action={action} interaction={interaction} showKey />
+      <TurboGauge />
 
       {/* ── top bar ── */}
       <div className="flex items-start justify-between gap-3 p-3 sm:p-4">
@@ -408,6 +410,7 @@ function MobileHud(p: HudProps) {
       {/* in-world prompt sits under the joystick zone, so a thumb landing
           on the stick can never trigger it by accident */}
       <InteractPrompt action={action} interaction={interaction} showKey={false} />
+      <TurboGauge />
 
       {/* ── compact top bar (notch-safe) ── */}
       <div className="absolute left-[calc(var(--safe-l)+0.5rem)] right-[calc(var(--safe-r)+0.5rem)] top-[calc(var(--safe-t)+0.5rem)] flex items-center justify-between gap-2">

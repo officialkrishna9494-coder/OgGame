@@ -91,7 +91,7 @@ function botPlayer(i: number, t: number): PlayerState {
 
 /** parked carts for offline / bot mode (no drivers, no motion) */
 function idleCarts(): CartState[] {
-  return CART_SPAWNS.map((s) => ({ id: s.id, x: s.x, z: s.z, facing: s.facing, speed: 0, driverId: null, color: s.color }));
+  return CART_SPAWNS.map((s) => ({ id: s.id, x: s.x, z: s.z, facing: s.facing, speed: 0, driverId: null, color: s.color, boost: 0 }));
 }
 
 export function useHallSocket(me: JoinInfo | null) {
@@ -312,7 +312,7 @@ export function useHallSocket(me: JoinInfo | null) {
   }, [emit]);
 
   const driveCart = useCallback(
-    (c: { id: string; x: number; z: number; facing: number; speed: number }) => {
+    (c: { id: string; x: number; z: number; facing: number; speed: number; boost?: number }) => {
       emit("cart:drive", c);
     },
     [emit]

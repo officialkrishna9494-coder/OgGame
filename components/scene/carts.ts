@@ -15,6 +15,10 @@ export interface CartRig {
   wheels: THREE.Mesh[];
   /** steering pivots for the two front wheels (yaw) */
   steerPivots: THREE.Group[];
+  /** turbo exhaust flames (outer, core, outer, core) — lit by CartPose.boost */
+  flames: THREE.Mesh[];
+  /** warm glow thrown by the flames while boosting */
+  flameLight: THREE.PointLight;
   mats: {
     paint: THREE.MeshStandardMaterial;
     dark: THREE.MeshStandardMaterial;
@@ -72,6 +76,10 @@ function cyl(r: number, h: number, seg = 20) {
 }
 function torus(r: number, tube: number) {
   return cached(`cart-tor:${r}:${tube}`, () => new THREE.TorusGeometry(r, tube, 10, 28));
+}
+/** open-ended cone, apex on +y — rotated to trail backwards for the flames */
+function cone(r: number, h: number, seg = 14) {
+  return cached(`cart-cone:${r}:${h}:${seg}`, () => new THREE.ConeGeometry(r, h, seg, 1, true));
 }
 function part(geometry: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0) {
   const mesh = new THREE.Mesh(geometry, material);
@@ -172,6 +180,49 @@ export function buildCart(color: string): CartRig {
     body.add(part(rb(0.13, 0.09, 0.04, 0.02), chrome, s * 0.61, 0.9, 0.44));
   }
 
+  // ── turbo exhausts — two flames out of the rear valance ────────────────
+  // Additive + depthWrite off, so they glow over the bodywork without ever
+  // punching a hole in the depth buffer. Hidden until the boost blend lights
+  // them (see poseCart), and scaled by the per-frame boost value.
+  const flameOuter = new THREE.MeshBasicMaterial({
+    color: "#ff7a18", transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const flameCore = new THREE.MeshBasicMaterial({
+    color: "#ffe9b0", transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const flames: THREE.Mesh[] = [];
+  for (const s of [-1, 1]) {
+    // half-length + the z the flame's base stays pinned to, so growing the
+    // flame stretches it BACKWARDS instead of poking it through the bumper
+    const outer = new THREE.Mesh(cone(0.21, 1.15), flameOuter);
+    outer.position.set(s * 0.21, 0.42, -1.055 - 0.575);
+    outer.rotation.x = -Math.PI / 2;
+    outer.castShadow = false;
+    outer.receiveShadow = false;
+    outer.visible = false;
+    outer.userData.flameBase = -1.05;
+    outer.userData.flameHalf = 0.575;
+    body.add(outer);
+    flames.push(outer);
+
+    const core = new THREE.Mesh(cone(0.12, 0.72), flameCore);
+    core.position.set(s * 0.21, 0.42, -1.05 - 0.36);
+    core.rotation.x = -Math.PI / 2;
+    core.castShadow = false;
+    core.receiveShadow = false;
+    core.visible = false;
+    core.userData.flameBase = -1.05;
+    core.userData.flameHalf = 0.36;
+    body.add(core);
+    flames.push(core);
+  }
+  const flameLight = new THREE.PointLight("#ff8a2b", 0, 9, 2);
+  flameLight.position.set(0, 0.55, -1.7);
+  flameLight.castShadow = false;
+  body.add(flameLight);
+
   // ── wheels — tires + hubcaps, fronts on steering pivots ────────────────
   const wheels: THREE.Mesh[] = [];
   const steerPivots: THREE.Group[] = [];
@@ -193,10 +244,10 @@ export function buildCart(color: string): CartRig {
     if (sz === 1) steerPivots.push(pivot);
   }
 
-  const owned = [paint, dark, trim, chrome, cushion, glass, lamp, tail, tireMat, hubMat];
+  const owned = [paint, dark, trim, chrome, cushion, glass, lamp, tail, tireMat, hubMat, flameOuter, flameCore];
   group.userData.cartMats = owned;
 
-  return { group, body, wheels, steerPivots, mats: { paint, dark }, steer: 0, prevSpeed: 0 };
+  return { group, body, wheels, steerPivots, flames, flameLight, mats: { paint, dark }, steer: 0, prevSpeed: 0 };
 }
 
 export function disposeCart(rig: CartRig) {
@@ -214,6 +265,8 @@ export interface CartPose {
   /** -1 (full left) … 1 (full right) */
   steer: number;
   elapsed: number;
+  /** 0…1 turbo blend — lights and stretches the exhaust flames */
+  boost?: number;
 }
 
 /** Spin wheels, yaw the fronts, lean the body — call once per frame. */
@@ -235,4 +288,23 @@ export function poseCart(rig: CartRig, dt: number, p: CartPose): void {
   rig.body.rotation.z = damp(rig.body.rotation.z, targetRoll, dt, 6);
   rig.body.rotation.x = damp(rig.body.rotation.x, targetPitch, dt, 6);
   rig.body.position.y = Math.abs(Math.sin(p.elapsed * 17)) * 0.008 * grip;
+
+  // ── turbo flames — lit by the boost blend, flickering like a real exhaust.
+  // Two out-of-phase sines read as an unsteady flame with no randomness (so
+  // every screen shows the same fire), and the core burns shorter + paler.
+  const boost = Math.max(0, Math.min(1, p.boost ?? 0));
+  const lit = boost > 0.02;
+  for (let i = 0; i < rig.flames.length; i++) {
+    const f = rig.flames[i];
+    if (f.visible !== lit) f.visible = lit;
+    if (!lit) continue;
+    const core = (i & 1) === 1;
+    const flick = 0.74 + 0.19 * Math.sin(p.elapsed * 31 + i * 2.1) + 0.11 * Math.sin(p.elapsed * 57 + i);
+    const len = boost * flick * (core ? 0.62 : 1);
+    const girth = boost * (core ? 0.6 : 0.9) * (0.85 + 0.3 * flick);
+    f.scale.set(girth, len, girth);
+    f.position.z = (f.userData.flameBase as number) - (f.userData.flameHalf as number) * len;
+    (f.material as THREE.MeshBasicMaterial).opacity = Math.min(1, boost * (core ? 0.95 : 0.75) * flick * 1.25);
+  }
+  rig.flameLight.intensity = lit ? boost * (6 + 3 * Math.sin(p.elapsed * 38) + 1.5 * Math.sin(p.elapsed * 71)) : 0;
 }
