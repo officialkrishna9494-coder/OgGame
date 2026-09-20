@@ -302,15 +302,16 @@ export function poseCart(rig: CartRig, dt: number, p: CartPose): void {
   // spinner takes the opposite sign of the front-wheel yaw above. Full lock
   // ≈ ±1.9 rad (≈110°) like a real kart.
   rig.steerWheel.rotation.z = rig.steer * 1.9;
-  // lean into corners, squat under braking, tremble softly with speed
+  // settled, professional ride: gentle lean into corners, faint squat under
+  // braking, and only a whisper of idle motion — no buzz at speed
   const grip = Math.min(1, Math.abs(p.speed) / 6);
   const accel = dt > 0 ? (p.speed - rig.prevSpeed) / dt : 0;
   rig.prevSpeed = p.speed;
-  const targetRoll = -rig.steer * grip * 0.07;
-  const targetPitch = Math.max(-0.03, Math.min(0.03, -accel * 0.004));
+  const targetRoll = -rig.steer * grip * 0.045;
+  const targetPitch = Math.max(-0.02, Math.min(0.02, -accel * 0.003));
   rig.body.rotation.z = damp(rig.body.rotation.z, targetRoll, dt, 6);
   rig.body.rotation.x = damp(rig.body.rotation.x, targetPitch, dt, 6);
-  rig.body.position.y = Math.abs(Math.sin(p.elapsed * 17)) * 0.008 * grip;
+  rig.body.position.y = Math.abs(Math.sin(p.elapsed * 9)) * 0.0025 * grip;
 
   // ── turbo flames — lit by the boost blend, flickering like a real exhaust.
   // Two out-of-phase sines read as an unsteady flame with no randomness (so

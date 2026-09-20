@@ -21,7 +21,7 @@ import { drivePad } from "../lib/drive-pad";
 import { cycleViewMode, isFirstPerson, viewState } from "../lib/view-state";
 import { paintTvScreen, tvScreenAnchor } from "../lib/tv-screen";
 import { resetTurbo, turboState } from "../lib/turbo-state";
-import { bumpSfx } from "../lib/sfx";
+import { bonkSfx, bounceSfx, bumpSfx, engineStop, engineUpdate, throwSfx } from "../lib/sfx";
 import { COLLIDERS, SOFA_SEATS } from "../lib/room-defaults";
 
 export interface DodgeThrow {
@@ -1741,7 +1741,13 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         ballPhys.holderId = null;
         // sphere vs the hall's furniture (lib/ball-physics) — bounces off,
         // lands on and rolls off solids; never passes into them
-        stepBall(ballPhys, dt);
+        const fallSpeed = -ballPhys.vy;
+        const ballTouched = stepBall(ballPhys, dt);
+        // ground thud, scaled by impact and distance (far bounces stay silent)
+        if (ballTouched & TOUCH_FLOOR && fallSpeed > 2) {
+          const bd = Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z);
+          if (bd < 16) bounceSfx((fallSpeed / 6) * Math.max(0.2, 1 - bd / 18));
+        }
         // pickup
         const d = Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z);
         const speed = Math.hypot(ballPhys.vx, ballPhys.vz);
@@ -1794,7 +1800,12 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           if (nb.spent) sim.live = false;
           if (serverNow - nb.thrownAt > DODGE_LIVE_MS) sim.live = false;
           const wasLive = sim.live;
+          const dodgeFall = -sim.body.vy;
           const touched = stepBall(sim.body, dt);
+          if (touched & TOUCH_FLOOR && dodgeFall > 2) {
+            const bd = Math.hypot(me.x - sim.body.x, me.z - sim.body.z);
+            if (bd < 16) bounceSfx((dodgeFall / 6) * Math.max(0.2, 1 - bd / 18));
+          }
           if (touched & (TOUCH_FLOOR | TOUCH_SOLID | TOUCH_WALL)) sim.live = false;
           // the thrower's screen calls a throw dead the moment it lands
           if (wasLive && !sim.live && nb.throwerId === myId && !flyingLocally) cbRef.current.onDodgeSpend(nb.id, nb.rev);
@@ -1816,6 +1827,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             sim.live = false;
             lastDodgeHitAt = Date.now();
             selfHitAt = Date.now();
+            bonkSfx();
             cbRef.current.onDodgeHit(nb.id, { x: sim.body.x, y: sim.body.y, z: sim.body.z, vx: sim.body.vx, vz: sim.body.vz });
             sim.body.vx *= -0.25;
             sim.body.vz *= -0.25;
@@ -1866,6 +1878,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           Math.hypot(me.x - ballPhys.x, me.z - ballPhys.z) < 0.9
         ) {
           selfHitAt = now;
+          bonkSfx();
           cbRef.current.onHit();
         }
       }
@@ -2019,6 +2032,11 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       const dt = Math.min(Math.max(timer.getDelta(), 0.0005), 1 / 30);
       const elapsed = timer.getElapsed();
       step(dt);
+      // kart engine follows my drive: pitch climbs with speed, turbo adds
+      // air — silent the moment I hop out (engineStop idles the gain)
+      const mySim = myCartId ? cartSim.get(myCartId) : undefined;
+      if (mySim) engineUpdate(mySim.speed, mySim.boost);
+      else engineStop();
 
       const st = stateRef.current;
 
@@ -2653,6 +2671,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         sim.body.vx = Math.sin(yaw) * DODGE_THROW_SPEED;
         sim.body.vz = Math.cos(yaw) * DODGE_THROW_SPEED;
         sim.body.vy = DODGE_THROW_LIFT;
+        throwSfx();
         sim.live = true;
         sim.localUntil = performance.now() + 700;
         me.facing = yaw;
@@ -2672,6 +2691,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         ballPhys.vx = Math.sin(f) * 5.5;
         ballPhys.vz = Math.cos(f) * 5.5;
         ballPhys.vy = 4.6;
+        throwSfx();
         ballPhys.throwerId = MY_ID;
         ballPhys.thrownAt = Date.now();
         optimisticHold = false;
@@ -2804,6 +2824,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       if (joy.owner === "canvas") resetJoy();
       env.dispose();
       skids.dispose();
+      engineStop();
       for (const r of cartRigs.values()) {
         scene.remove(r.group);
         disposeCart(r);
