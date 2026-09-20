@@ -1,9 +1,10 @@
 // ─── Cozy Hall · live TV on the 3D screen ─────────────────────────────────────
 // The hall's TV plays the room's real YouTube video, not just a status card:
-// a muted iframe pinned exactly over the 3D screen (cross-origin pixels can
-// never enter WebGL, so an overlay like this is how wall TVs show real
-// video). Sound + controls stay in the TV panel — this is the silent picture
-// on the wall, always in sync with the room.
+// an iframe pinned exactly over the 3D screen (cross-origin pixels can never
+// enter WebGL, so an overlay like this is how wall TVs show real video). The
+// wall is also the room's default speaker — it stays silent until this viewer
+// joins the audio, and while the shelf's own player is open that one speaks
+// instead, so two players never play over each other.
 //
 // The SCENE moves this box, not the component: the render loop projects the
 // screen's corners and paints the matrix in the tick it draws the frame, so
@@ -27,6 +28,7 @@
 import { useEffect, useRef } from "react";
 import type { TvState } from "../lib/hall-types";
 import { loadYouTubeApi } from "../lib/youtube";
+import { markTvGesture, tvGestureSeen } from "../lib/tv-audio";
 import { TV_OVERLAY_H, TV_OVERLAY_W, tvScreenAnchor } from "../lib/tv-screen";
 
 const DRIFT_TOLERANCE = 2.5;
@@ -36,9 +38,13 @@ const RESYNC_MS = 4_000;
 interface Props {
   tv: TvState;
   fallbackPlaylist: Array<{ id: string; title: string }>;
+  /** this viewer hears the room's TV */
+  audio: boolean;
+  /** the shelf's own player is open — it owns the sound while it is */
+  panelAudio: boolean;
 }
 
-export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
+export default function TvScreenOverlay({ tv, fallbackPlaylist, audio, panelAudio }: Props) {
   const playlist = tv.playlist.length ? tv.playlist : fallbackPlaylist;
   const cur = playlist[tv.index % Math.max(1, playlist.length)];
   const videoId = cur?.id ?? "";
@@ -51,11 +57,15 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
   const tvRef = useRef(tv);
   const videoRef = useRef(videoId);
   const fallbackRef = useRef(fallbackPlaylist);
+  const audioRef = useRef(audio);
+  const panelAudioRef = useRef(panelAudio);
 
   useEffect(() => {
     tvRef.current = tv;
     videoRef.current = videoId;
     fallbackRef.current = fallbackPlaylist;
+    audioRef.current = audio;
+    panelAudioRef.current = panelAudio;
     // only a loaded player with a real video may be put on the wall
     tvScreenAnchor.ready = readyRef.current && !!videoId;
   });
@@ -74,7 +84,12 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
       (state.positionSec ?? 0) + (state.playing ? (Date.now() - state.updatedAt) / 1000 : 0)
     );
     try {
-      player.mute();
+      // the wall speaks only when this viewer joined the audio, the shelf's
+      // player is closed, and a real interaction has happened (browsers refuse
+      // unmuted playback before that) — otherwise it stays silent, so the room
+      // never hears the same video twice
+      if (audioRef.current && !panelAudioRef.current && tvGestureSeen()) player.unMute();
+      else player.mute();
       const fresh = id !== loadedRef.current;
       if (state.playing) {
         // load straight to the room's frame — no jump from 0 to the seek
@@ -113,6 +128,16 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
           playerVars: { rel: 0, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, playsinline: 1 },
           events: {
             onReady: (e) => {
+              // The widget API replaces the host element with the iframe and
+              // carries the host's class over, so descendant selectors never
+              // apply — size the frame itself instead of trusting that copy.
+              const frame = e.target.getIframe();
+              frame.style.position = "absolute";
+              frame.style.inset = "0";
+              frame.style.width = "100%";
+              frame.style.height = "100%";
+              frame.style.border = "0";
+              frame.style.display = "block";
               try {
                 e.target.mute();
               } catch {
@@ -147,6 +172,11 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
     syncPlayer();
   }, [videoId, tv.index, tv.playing, tv.positionSec, tv.updatedAt, fallbackPlaylist]);
 
+  // joining or leaving the room's sound reaches the wall player immediately
+  useEffect(() => {
+    syncPlayer();
+  }, [audio, panelAudio]);
+
   // stay on the room clock without waiting for a room event:
   //  · backgrounding pauses the iframe — resync the moment we come back
   //  · a blocked autoplay / mid-video buffer heals on the next catch-up
@@ -157,6 +187,7 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
       if (!document.hidden) syncPlayer();
     };
     const unlock = () => {
+      markTvGesture();
       syncPlayer();
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
@@ -192,7 +223,7 @@ export default function TvScreenOverlay({ tv, fallbackPlaylist }: Props) {
       className="pointer-events-none absolute left-0 top-0 z-0 touch-none select-none"
       style={{ width: TV_OVERLAY_W, height: TV_OVERLAY_H, transformOrigin: "0 0", display: "none" }}
     >
-      <div ref={mountRef} className="h-full w-full overflow-hidden bg-black [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:border-0" />
+      <div ref={mountRef} className="absolute inset-0 overflow-hidden bg-black" />
     </div>
   );
 }

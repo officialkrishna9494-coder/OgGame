@@ -133,6 +133,93 @@ ok("paint: the DOM layer moves in the frame tick, from the same camera", () => {
   assert.match(lib, /tvScreenAnchor\.shown/, "hide/show only on change");
 });
 
+ok("sound: exactly one speaker per viewer, and the shelf owns it when open", () => {
+  const ov = read("components/TvScreenOverlay.tsx");
+  assert.match(
+    ov,
+    /audioRef\.current && !panelAudioRef\.current && tvGestureSeen\(\)\s*\)\s*player\.unMute\(\)/,
+    "the wall speaks only when joined, the shelf is shut, and a gesture happened"
+  );
+  assert.match(ov, /else player\.mute\(\)/, "silent otherwise — the room never hears it twice");
+  assert.match(ov, /markTvGesture\(\)/, "records the interaction browsers demand");
+  assert.match(ov, /frame\.style\.position = "absolute"/, "the wall frame is sized by us, not by a copied class");
+  assert.match(ov, /\}, \[audio, panelAudio\]\)/, "joining applies to the wall at once");
+  const lib = read("lib/tv-audio.ts");
+  assert.match(lib, /localStorage/, "the choice is remembered between visits");
+  assert.match(lib, /typeof window === "undefined"/, "safe to render on the server");
+  const page = read("app/page.tsx");
+  assert.match(page, /const toggleTvAudio = useCallback\(\(\) => \{\s*[\s\S]{0,220}markTvGesture\(\);/, "asking for sound counts as the interaction");
+});
+
+ok("shelf: controls first, the player exists only while it is open", () => {
+  const panel = read("components/TvPanel.tsx");
+  // closed = controls only: no box, no parked embed, nothing that can pop up
+  assert.ok(!panel.includes("opacity-0"), "a closed shelf parks no invisible screen");
+  assert.match(panel, /\{playerOpen && \(/, "the screen's box exists only while open");
+  assert.match(panel, /max-h-\[calc\(100dvh-6rem\)\]/, "the panel can never outgrow the viewport");
+  assert.match(panel, /h-\[min\(44dvh,240px\)\]/, "the video is viewport-capped, so the controls stay reachable");
+  const controls = panel.indexOf("play for everyone");
+  const list = panel.indexOf("max-h-28 min-h-0 flex-1 overflow-y-auto");
+  assert.ok(controls > 0 && controls < list, "controls sit outside the scrolling list");
+  assert.match(panel, /controls: 1/, "native controls for seek / fast-forward");
+  assert.match(panel, /fs: 1/, "fullscreen is offered");
+  assert.match(panel, /!frame\.hasAttribute\("allowfullscreen"\)/, "only patched when missing — re-editing restarts the embed");
+  assert.match(panel, /onToggleAudio/, "one button joins the room's sound");
+  assert.match(panel, /onTogglePlayer/, "one button opens the full player");
+  assert.match(panel, /seekTo: t/, "a seek in the opened player is relayed to the room");
+  assert.match(panel, /setProg\(\{\s*\n\s*t: Math\.max\(0, \(s\.positionSec/, "the readout still follows the room's clock with the screen closed");
+  const page = read("app/page.tsx");
+  assert.match(page, /panelAudio=\{tvOpen && tvPlayerOpen\}/, "the shelf is the speaker only while open");
+  assert.match(page, /onToggleAudio=\{toggleTvAudio\}/, "the panel drives the shared state");
+  assert.match(page, /setTvPlayerOpen\(false\);/, "hiding the shelf hands the sound back to the wall");
+});
+
+ok("player lifecycle: one embed per open, never rebuilt on a video change", () => {
+  const panel = read("components/TvPanel.tsx");
+  const create = panel.indexOf("const host = document.createElement(\"div\");");
+  const effectEnd = panel.indexOf("}, [playerOpen]);");
+  assert.ok(create > 0 && effectEnd > create, "the embed is built in the open-only effect");
+  const block = panel.slice(create, effectEnd);
+  assert.match(block, /wrap\.appendChild\(host\)/, "the API owns OUR node, never one React renders");
+  assert.ok(!/\[videoId\]/.test(panel), "videoId is never an effect dep — rebuilding per video is the storm");
+  assert.ok(!block.includes("new YT.Player(host") === false, "the player is constructed on that node");
+  assert.match(block, /return \(\) => \{[\s\S]{0,260}player\?\.destroy\(\);[\s\S]{0,120}host\.remove\(\);/, "closing destroys the embed and its node");
+  assert.match(panel, /if \(!playerOpen\) return;\s*\n\s*const wrap = wrapRef\.current;/, "nothing is created while the shelf is closed");
+  // videos swap through the open player, never by rebuilding it
+  const sync = panel.slice(panel.indexOf("const syncToRoom"), panel.indexOf("// Open → build the player"));
+  assert.match(sync, /if \(id !== loadedRef\.current\) \{/, "a video change is a swap, not a rebuild");
+  assert.match(sync, /player\.loadVideoById\(id, target\)/, "a playing room loads straight to the room's frame");
+  assert.match(sync, /player\.cueVideoById\(id, target\)/, "a paused room cues a real frame — never a black player");
+  assert.ok(!/new YT\.Player/.test(sync), "the sync path can never construct a player");
+});
+
+ok("player lifecycle: a loading player can never walk the shelf forward", () => {
+  const panel = read("components/TvPanel.tsx");
+  assert.match(panel, /const LOAD_GRACE_MS = 3_000/,
+    "a player younger than the grace window cannot have ended a video");
+  const ended = panel.indexOf("YT.PlayerState.ENDED");
+  const after = panel.indexOf("YT.PlayerState.PLAYING", ended);
+  const guard = panel.slice(ended, after > 0 ? after : panel.length);
+  assert.match(guard, /loadedRef\.current !== curIdRef\.current/, "only the video we actually loaded may advance");
+  assert.match(guard, /now - loadAtRef\.current < LOAD_GRACE_MS/, "no advance within the load grace window");
+  assert.match(guard, /now < applyingUntil\.current/, "our own load/seek never reads as an ended video");
+  assert.match(guard, /if \(!\(dur > 1\)\) return;/, "a video with no duration is not a finished video");
+  assert.match(guard, /ctlRef\.current\(\{ index: \(s\.index \+ 1\) % len, playing: true, positionSec: 0 \}\)/,
+    "a real end still advances for everyone");
+});
+
+ok("sound: a closed shelf has no player at all, so it cannot be heard", () => {
+  const panel = read("components/TvPanel.tsx");
+  assert.ok(!panel.includes("quietStop"), "no hidden player left to mute — it is destroyed instead");
+  assert.match(panel, /if \(audioRef\.current\) player\.unMute\(\),?/, "the open screen carries this viewer's sound");
+  assert.match(panel, /else player\.mute\(\)/, "silent until this viewer joins");
+  assert.match(panel, /if \(!player \|\| !readyRef\.current \|\| !playerOpenRef\.current\) return;/,
+    "nothing syncs without an open, ready player");
+  assert.match(panel, /if \(!player \|\| !playerOpenRef\.current\) \{/, "a closed screen relays no seeks and no heartbeats");
+  assert.match(panel, /const RESYNC_MS = 4_000/, "an open screen re-reads the room on a beat");
+  assert.match(panel, /setInterval\(\(\) => \{\s*if \(!document\.hidden\) syncToRoom\(\);/, "the beat skips backgrounded tabs");
+});
+
 ok("overlay: heals its own playback (catch-up beat, gesture unlock, tab return)", () => {
   const ov = read("components/TvScreenOverlay.tsx");
   assert.match(ov, /const RESYNC_MS = 4_000/, "frozen/stalled video retries on a beat");

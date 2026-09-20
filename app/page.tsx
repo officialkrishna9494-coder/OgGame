@@ -16,6 +16,7 @@ import RpsPanel from "../components/RpsPanel";
 import SosAlert from "../components/SosAlert";
 import Hud from "../components/Hud";
 import TvScreenOverlay from "../components/TvScreenOverlay";
+import { markTvGesture, readTvAudio, writeTvAudio } from "../lib/tv-audio";
 import RotatePrompt from "../components/RotatePrompt";
 import TvPanel from "../components/TvPanel";
 import VoicePanel from "../components/VoicePanel";
@@ -49,6 +50,21 @@ function HallClient({ me }: { me: Identity }) {
   }));
   const [profileOpen, setProfileOpen] = useState(false);
   const [tvOpen, setTvOpen] = useState(false);
+  // the shelf's own screen (full YouTube controls) — closed by default, so the
+  // panel stays a set of controls and the wall TV carries the picture
+  const [tvPlayerOpen, setTvPlayerOpen] = useState(false);
+  // this viewer hears the room's TV (remembered between visits)
+  const [tvAudio, setTvAudio] = useState(readTvAudio);
+  const toggleTvAudio = useCallback(() => {
+    // asking for the sound IS the interaction browsers require before a player
+    // may be unmuted, so record it here instead of waiting for a stray tap
+    markTvGesture();
+    setTvAudio((on) => {
+      const next = !on;
+      writeTvAudio(next);
+      return next;
+    });
+  }, []);
   // endsAt of the star-scramble round this player hid (0 = none hidden)
   const [gameHiddenRound, setGameHiddenRound] = useState(0);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -281,7 +297,12 @@ function HallClient({ me }: { me: Identity }) {
           scene punches a depth-tested hole where the screen is the front-most
           surface, so lamps, scoreboards and the next room's walls occlude the
           picture like real geometry. Muted; the TV panel carries the sound. */}
-      <TvScreenOverlay tv={{ ...tv, playlist: tvPlaylist }} fallbackPlaylist={room.tv} />
+      <TvScreenOverlay
+        tv={{ ...tv, playlist: tvPlaylist }}
+        fallbackPlaylist={room.tv}
+        audio={tvAudio}
+        panelAudio={tvOpen && tvPlayerOpen}
+      />
 
       <HallScene
         myName={profile.name}
@@ -407,8 +428,17 @@ function HallClient({ me }: { me: Identity }) {
           tv={{ ...tv, playlist: tvPlaylist }}
           fallbackPlaylist={room.tv}
           compact={mobile}
+          playerOpen={tvPlayerOpen}
+          onTogglePlayer={() => setTvPlayerOpen((v) => !v)}
+          audio={tvAudio}
+          onToggleAudio={toggleTvAudio}
           onControl={socket.tvControl}
-          onClose={() => setTvOpen(false)}
+          onClose={() => {
+            // closing the shelf closes its screen too, so the wall takes the
+            // sound back instead of a player nobody can see holding it
+            setTvOpen(false);
+            setTvPlayerOpen(false);
+          }}
         />
       )}
 
