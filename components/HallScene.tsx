@@ -21,6 +21,7 @@ import { drivePad } from "../lib/drive-pad";
 import { cycleViewMode, isFirstPerson, viewState } from "../lib/view-state";
 import { paintTvScreen, tvScreenAnchor } from "../lib/tv-screen";
 import { resetTurbo, turboState } from "../lib/turbo-state";
+import { nightState, toggleNight } from "../lib/night-state";
 import { bonkSfx, bounceSfx, bumpSfx, engineStop, engineUpdate, throwSfx } from "../lib/sfx";
 import { COLLIDERS, SOFA_SEATS } from "../lib/room-defaults";
 
@@ -430,7 +431,19 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     camera.position.set(0, 13, 16);
 
     // ── lights ──
-    scene.add(new THREE.HemisphereLight("#fff7ea", "#d9c3a5", 0.95));
+    const hemi = new THREE.HemisphereLight("#fff7ea", "#d9c3a5", 0.95);
+    scene.add(hemi);
+    // day / night cross-fade targets (moon button + N key flip nightState;
+    // the loop below glides every light toward it in ~1s)
+    const DAY_BG = new THREE.Color("#f6efe6");
+    const NIGHT_BG = new THREE.Color("#14111d");
+    const DAY_SKY = new THREE.Color("#fff7ea");
+    const NIGHT_SKY = new THREE.Color("#5560a0");
+    const DAY_GND = new THREE.Color("#d9c3a5");
+    const NIGHT_GND = new THREE.Color("#241d33");
+    const DAY_SUN = new THREE.Color("#fff1dc");
+    const NIGHT_SUN = new THREE.Color("#a9c1ff");
+    let nightK = 0;
     // ── stable shadows ──
     // The sun and its shadow box never move: the box is fitted once around
     // the whole hall (walls included). A shadow camera that follows the player
@@ -1076,6 +1089,12 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       if (k === "v" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         cycleViewMode();
+        return;
+      }
+      // N — flip day ↔ night party lights (same toggle as the moon button)
+      if (k === "n" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleNight();
         return;
       }
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k) || ["w", "a", "s", "d"].includes(k)) {
@@ -2038,6 +2057,19 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       if (mySim) engineUpdate(mySim.speed, mySim.boost);
       else engineStop();
 
+      // day / night ambiance: sun cools into moonlight, the sky goes deep
+      // party-navy, practicals (café, fire, TV) take over via env.setNight
+      nightK += ((nightState.night ? 1 : 0) - nightK) * Math.min(1, dt * 2.5);
+      (scene.background as THREE.Color).lerpColors(DAY_BG, NIGHT_BG, nightK);
+      scene.fog?.color.copy(scene.background as THREE.Color);
+      hemi.color.lerpColors(DAY_SKY, NIGHT_SKY, nightK);
+      hemi.groundColor.lerpColors(DAY_GND, NIGHT_GND, nightK);
+      hemi.intensity = 0.95 - nightK * 0.73;
+      sun.color.lerpColors(DAY_SUN, NIGHT_SUN, nightK);
+      sun.intensity = 1.6 - nightK * 1.25;
+      renderer.toneMappingExposure = 1.05 - nightK * 0.15;
+      env.setNight(nightState.night);
+
       const st = stateRef.current;
 
       // ── sync avatars ──
@@ -2452,7 +2484,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         sosLight.intensity += (3 - sosLight.intensity) * Math.min(1, dt * 4);
         sosDomeMat.emissiveIntensity += (0.7 - sosDomeMat.emissiveIntensity) * Math.min(1, dt * 4);
       }
-      tvGlow.intensity = 8 + Math.sin(elapsed * 6) * 1 + (st.tv.playing ? 3 : 0);
+      tvGlow.intensity = (8 + Math.sin(elapsed * 6) * 1 + (st.tv.playing ? 3 : 0)) * (1 + nightK * 0.6);
 
       // ── camera follow: both the position AND the gaze point are damped,
       // so the frame glides instead of shaking ──

@@ -33,6 +33,7 @@ import { popSfx, sosSfx, startSfx, winSfx } from "../lib/sfx";
 import type { Identity } from "../lib/auth";
 import { storeProfile } from "../lib/auth";
 import { cycleViewMode, onViewChange, viewState } from "../lib/view-state";
+import { onNightChange, toggleNight } from "../lib/night-state";
 import { IDLE_CONTEXT, type BallState, type ContextState, type PlayerState } from "../lib/hall-types";
 import { stampRoom } from "../lib/room-store";
 
@@ -224,6 +225,10 @@ function HallClient({ me }: { me: Identity }) {
   }, []);
   // V key / view tile: follow → first-person → close chase → follow …
   const handleToggleView = useCallback(() => cycleViewMode(), []);
+  // moon button / N key: day ↔ night party lights (toast announces both)
+  const handleToggleNight = useCallback(() => {
+    toggleNight();
+  }, []);
   // phones open right behind their character: chase is the mobile default
   // (desktop keeps the classic dollhouse). Only while the view is untouched,
   // so a chosen view is never overridden and no toast fires on entry.
@@ -243,6 +248,14 @@ function HallClient({ me }: { me: Identity }) {
               : "follow view — classic dollhouse",
           "view"
         )
+      ),
+    [pushToast]
+  );
+  // same for day / night, so the N key answers too
+  useEffect(
+    () =>
+      onNightChange((night) =>
+        pushToast(night ? "night mode — party lights on" : "daylight — back to cozy morning", "moon")
       ),
     [pushToast]
   );
@@ -374,6 +387,7 @@ function HallClient({ me }: { me: Identity }) {
         onRpsAct={handleRpsAct}
         onToggleChat={toggleChat}
         onToggleView={handleToggleView}
+        onToggleNight={handleToggleNight}
         onSos={handleSos}
         onOpenAddLink={() => setLinkOpen(true)}
       />

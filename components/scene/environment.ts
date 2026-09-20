@@ -54,6 +54,8 @@ export interface Environment {
   setCourtMode: (mode: CourtMode) => void;
   /** show the front wall + ceiling when the camera rides inside the room */
   setEnclosure: (inside: boolean) => void;
+  /** glide the warm practicals toward party-night (the loop owns sun + sky) */
+  setNight: (night: boolean) => void;
   /** the fireplace + café lights, for the render loop's light budget */
   dispose: () => void;
 }
@@ -69,6 +71,11 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
   scene.add(root);
   const ticks: Tick[] = [];
   const disposables: Array<{ dispose: () => void }> = [];
+  // ── day / night practicals: the loop sets nightTarget, a tick glides
+  // nightK toward it, and the warm lights below burn brighter after dark ──
+  let nightTarget = false;
+  let nightK = 0;
+  let cafeLight: THREE.PointLight | null = null;
 
   // ───────────────────────────── room shell ─────────────────────────────
   {
@@ -738,10 +745,15 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
       cafe.add(pivot);
       pendants.push(pivot);
     }
-    const cafeLight = new THREE.PointLight("#ffc27a", 12, 13, 2);
+    cafeLight = new THREE.PointLight("#ffc27a", 12, 13, 2);
     cafeLight.position.set(counter.x, 3.4, counter.z + 2.2);
     root.add(cafeLight);
     ticks.push((t) => pendants.forEach((p, i) => (p.rotation.z = Math.sin(t * 0.7 + i) * 0.012)));
+    // night glide for the practicals (runs inside env.tick every frame)
+    ticks.push((_, dt) => {
+      nightK += ((nightTarget ? 1 : 0) - nightK) * Math.min(1, dt * 2.5);
+      if (cafeLight) cafeLight.intensity = 12 + nightK * 9;
+    });
 
     // bar stools
     CAFE.stools.forEach((s, i) => {
@@ -904,8 +916,8 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
         (f.material as THREE.MeshBasicMaterial).opacity = 0.7 + n * 0.4;
       }
       const flick = Math.sin(t * 9) * 0.6 + Math.sin(t * 23.7) * 0.45 + Math.sin(t * 4.1) * 0.3;
-      fireLight.intensity = 9 + flick * 1.6;
-      fireGlow.material.opacity = 0.5 + flick * 0.05;
+      fireLight.intensity = 9 + nightK * 5 + flick * 1.6;
+      fireGlow.material.opacity = 0.5 + nightK * 0.12 + flick * 0.05;
       for (const { e, phase } of embers) {
         const k = (t * 0.45 + phase) % 1;
         e.position.set(Math.sin((phase + t) * 5) * 0.12 - 0.05, 0.3 + k * 1.3, Math.cos(phase * 20) * 0.5);
@@ -1275,6 +1287,9 @@ export function buildEnvironment(scene: THREE.Scene): Environment {
       enclosureOn = inside;
       enclosure.visible = inside;
       raceGated.visible = inside;
+    },
+    setNight: (night) => {
+      nightTarget = night;
     },
     dispose: () => {
       for (const d of disposables) d.dispose();

@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production tsx server.js",
     "start:next": "next start",
     "lint": "eslint",
-    "test": "tsx tests/mobile-controls.test.mts && tsx tests/raceway.test.mts && tsx tests/boards.test.mts && tsx tests/identity.test.mts && tsx tests/enclosure.test.mts && tsx tests/tv-screen.test.mts"
+    "test": "tsx tests/mobile-controls.test.mts && tsx tests/raceway.test.mts && tsx tests/boards.test.mts && tsx tests/identity.test.mts && tsx tests/enclosure.test.mts && tsx tests/tv-screen.test.mts && tsx tests/night.test.mts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { EMOTES } from "../lib/hall-types";
 import type { ContextState, PlayerState } from "../lib/hall-types";
 import { markNudgeSeen, nudgeSeen, useFullscreen } from "../lib/fullscreen";
+import { nightState, onNightChange } from "../lib/night-state";
 import { resolveAction, type ActionKey, type InteractAction } from "../lib/interaction";
 import type { Toast } from "../lib/useHallSocket";
 import { useInteraction, type Interaction } from "../lib/useInteraction";
@@ -68,6 +69,7 @@ interface Props {
   onRpsAct: () => void;
   onToggleChat: () => void;
   onToggleView: () => void;
+  onToggleNight: () => void;
   onSos: () => void;
   onOpenAddLink: () => void;
 }
@@ -75,12 +77,16 @@ interface Props {
 type HudProps = Props & {
   others: Array<[string, PlayerState]>;
   count: number;
+  night: boolean;
   action: InteractAction | null;
   interaction: Interaction;
 };
 
 export default function Hud(p: Props) {
   const [emoteOpen, setEmoteOpen] = useState(false);
+  // day / night follows the shared singleton (moon buttons + N key flip it)
+  const [night, setNight] = useState(nightState.night);
+  useEffect(() => onNightChange(setNight), []);
   const others = Object.entries(p.players).filter(([id]) => id !== "me");
   const count = Object.keys(p.players).length;
 
@@ -106,7 +112,7 @@ export default function Hud(p: Props) {
   };
   const interaction = useInteraction(action, run);
 
-  if (p.mobile) return <MobileHud {...p} others={others} count={count} action={action} interaction={interaction} />;
+  if (p.mobile) return <MobileHud {...p} others={others} count={count} night={night} action={action} interaction={interaction} />;
 
   const btn =
     "flex h-11 items-center justify-center gap-1.5 rounded-2xl bg-white/85 px-3.5 text-[13px] font-bold text-[#4a3f55] shadow-[0_6px_20px_-8px_rgba(90,70,110,0.4)] ring-1 ring-black/[0.06] backdrop-blur transition-all hover:bg-white active:scale-95 disabled:opacity-35 disabled:saturate-50";
@@ -246,6 +252,9 @@ export default function Hud(p: Props) {
           <button className={`${btn} ${p.tvOpen ? "!bg-[#ff8fab] !text-white" : ""}`} onClick={p.onToggleTv} title="shared TV">
             <Icon name="tv" size={17} /> {p.tvOpen ? "hide" : "tv"}
           </button>
+          <button className={`${btn} ${night ? "!bg-[#3d3347] !text-white" : ""}`} onClick={p.onToggleNight} title="night party lights">
+            <Icon name="moon" size={17} /> {night ? "day" : "night"}
+          </button>
           <button className={`${btn} ${p.chatOpen ? "!bg-[#3d3347] !text-white" : ""}`} onClick={p.onToggleChat} title="hall chat">
             <span className="relative flex">
               <Icon name="chat" size={17} />
@@ -273,6 +282,7 @@ export default function Hud(p: Props) {
             <LegendKey>Space</LegendKey> hop
             <LegendKey>E</LegendKey> interact
             <LegendKey>V</LegendKey> view
+            <LegendKey>N</LegendKey> night
           </span>
         </div>
       </div>
@@ -381,6 +391,7 @@ function MobileHud(p: HudProps) {
     { key: "poke", icon: "poke", label: "poke", run: p.onPoke, disabled: !p.nearName, keepOpen: true },
     { key: "five", icon: "highFive", label: "high-5", run: p.onHighfive, disabled: !p.nearName, keepOpen: true },
     { key: "tv", icon: "tv", label: p.tvOpen ? "hide tv" : "tv", run: p.onToggleTv, on: p.tvOpen },
+    { key: "night", icon: "moon", label: p.night ? "day" : "night", run: p.onToggleNight, on: p.night },
     { key: "sit", icon: "sit", label: p.sitting ? "stand" : "sit", run: p.onSit, on: p.sitting },
     // no rps tile: duels start (and are accepted) only via ACT at the table
     {
