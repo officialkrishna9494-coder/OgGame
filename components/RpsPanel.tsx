@@ -45,17 +45,20 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
 
   return (
     <div
-      className={`pointer-events-auto absolute z-20 overflow-hidden rounded-[24px] bg-white/92 shadow-[0_24px_70px_-18px_rgba(60,40,90,0.45)] ring-1 ring-black/[0.07] backdrop-blur ${
+      className={`pointer-events-auto absolute z-20 overflow-hidden rounded-[20px] bg-white shadow-[0_24px_70px_-24px_rgba(30,25,40,0.35)] ring-1 ring-black/10 ${
         compact
           ? "bottom-[calc(var(--safe-b)+0.5rem)] left-1/2 w-[min(78vw,320px)] -translate-x-1/2"
           : "bottom-24 left-1/2 w-[min(94vw,380px)] -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0"
       }`}
     >
-      <div className="flex items-center justify-between bg-gradient-to-r from-[#2d6a4f] to-[#40916c] px-4 py-2.5 text-white">
-        <p className="flex items-center gap-1.5 text-[13px] font-bold">
-          <Icon name={rps.status === "ended" ? "trophy" : "rps"} size={16} /> {title}
+      <div className="flex items-center justify-between border-b border-black/[0.08] px-4 py-2.5">
+        <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[#4a3f55]">
+          <Icon name={rps.status === "ended" ? "trophy" : "rps"} size={15} className="text-[#a08fb5]" /> {title}
         </p>
-        <button onClick={onClose} className="rounded-full bg-white/20 px-2.5 py-0.5 text-[12px] font-bold hover:bg-white/30">
+        <button
+          onClick={onClose}
+          className="rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#8a7f98] transition-colors hover:bg-black/[0.05] hover:text-[#4a3f55]"
+        >
           hide
         </button>
       </div>
@@ -68,7 +71,7 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
             </p>
             <button
               onClick={onChallenge}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white shadow-lg transition-transform hover:bg-[#2e2735] active:scale-[0.98]"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3 text-sm font-bold text-white transition-colors hover:bg-[#2e2735] active:scale-[0.98]"
             >
               <Icon name="duel" size={17} /> challenge the table
             </button>
@@ -87,14 +90,14 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
               {role === null ? (
                 <button
                   onClick={onChallenge}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white active:scale-[0.98]"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#2e2735] active:scale-[0.98]"
                 >
                   <Icon name="duel" size={16} /> accept
                 </button>
               ) : (
                 <button
                   onClick={onLeave}
-                  className="flex-1 rounded-2xl bg-black/[0.06] py-2.5 text-sm font-bold text-[#4a3f55] active:scale-[0.98]"
+                  className="flex-1 rounded-2xl border border-black/10 bg-white py-2.5 text-sm font-bold text-[#4a3f55] transition-colors hover:bg-black/[0.04] active:scale-[0.98]"
                 >
                   cancel
                 </button>
@@ -114,10 +117,10 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
                       <button
                         key={c}
                         onClick={() => onPick(c)}
-                        className={`flex flex-col items-center gap-1 rounded-2xl py-3 shadow transition-all active:scale-95 ${
+                        className={`flex flex-col items-center gap-1 rounded-2xl border py-3 transition-all active:scale-95 ${
                           myPick === c
-                            ? "bg-[#3d3347] text-white ring-2 ring-[#ffd166]"
-                            : "bg-[#efe8f7] text-[#4a3f55] hover:bg-[#e2d6f2]"
+                            ? "border-[#3d3347] bg-[#3d3347] text-white ring-2 ring-[#ffd166]/70"
+                            : "border-black/10 bg-white text-[#4a3f55] hover:bg-black/[0.04]"
                         }`}
                       >
                         <Icon name={c} size={30} />
@@ -155,7 +158,7 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
             {role && (
               <button
                 onClick={onLeave}
-                className="mt-2 w-full rounded-xl py-1.5 text-[11px] font-bold text-[#a99cbb] hover:text-[#b03939]"
+                className="mt-2 w-full rounded-xl py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#a99cbb] transition-colors hover:text-[#b03939]"
               >
                 forfeit match
               </button>
@@ -174,7 +177,7 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
             <ScoreLine rps={rps} />
             <button
               onClick={onChallenge}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white active:scale-[0.98]"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#2e2735] active:scale-[0.98]"
             >
               <Icon name="again" size={16} /> run it back
             </button>
@@ -187,7 +190,7 @@ export default function RpsPanel({ rps, mySocketId, compact, onChallenge, onPick
 
 function ScoreLine({ rps }: { rps: RpsState }) {
   return (
-    <div className="mt-1 flex items-center justify-center gap-3 rounded-2xl bg-black/[0.04] px-3 py-2">
+    <div className="mt-1 flex items-center justify-center gap-3 rounded-xl border border-black/[0.08] px-3 py-2">
       <span className="flex-1 truncate text-right text-[13px] font-extrabold text-[#3d3347]">{rps.names.a}</span>
       <span className="text-[15px] font-black tabular-nums text-[#3d3347]">
         {rps.scores.a}–{rps.scores.b}
@@ -210,7 +213,7 @@ function Reveal({ rps, role }: { rps: RpsState; role: "a" | "b" | null }) {
           ? `you take round ${rv.round}!`
           : `${rv.result === "a" ? rps.names.a : rps.names.b} takes round ${rv.round}`;
   return (
-    <div className="animate-pop-in mt-2 rounded-2xl bg-[#fff3d6] px-3 py-2.5 text-center">
+    <div className="animate-pop-in mt-2 rounded-xl border border-[#e5c26a] bg-[#fffaf0] px-3 py-2.5 text-center">
       <div className="flex items-center justify-center gap-3 text-[#3d3347]">
         <span className="text-[#e0577f]">
           <Icon name={rv.a} size={40} label={rv.a} />

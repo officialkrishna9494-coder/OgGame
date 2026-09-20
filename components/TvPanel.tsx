@@ -356,17 +356,27 @@ export default function TvPanel({
 
   return (
     <div
-      className={`pointer-events-auto absolute z-20 flex max-h-[calc(100dvh-6rem)] flex-col overflow-hidden rounded-[24px] bg-white/92 shadow-[0_24px_70px_-18px_rgba(60,40,90,0.45)] ring-1 ring-black/[0.07] backdrop-blur ${
+      className={`pointer-events-auto absolute z-20 flex max-h-[calc(100dvh-6rem)] flex-col overflow-hidden rounded-[20px] bg-white shadow-[0_24px_70px_-24px_rgba(30,25,40,0.35)] ring-1 ring-black/10 ${
         compact
           ? "bottom-[calc(var(--safe-b)+0.5rem)] left-1/2 w-[min(78vw,320px)] -translate-x-1/2"
           : "bottom-24 left-1/2 w-[min(94vw,430px)] -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0"
       }`}
     >
-      <div className="flex shrink-0 items-center justify-between bg-[#3d3347] px-4 py-2.5 text-white">
-        <p className="flex items-center gap-1.5 text-[13px] font-bold">
-          <Icon name="tv" size={16} /> shared tv {tv.playing ? "· playing" : "· paused"}
+      <div className="flex shrink-0 items-center justify-between border-b border-black/[0.08] px-4 py-2.5">
+        <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[#4a3f55]">
+          <Icon name="tv" size={15} className="text-[#a08fb5]" /> shared tv
+          <span
+            className={`rounded-full border px-1.5 py-px text-[9px] font-bold uppercase tracking-[0.08em] ${
+              tv.playing ? "border-[#7cc9a1] text-[#2a9e6e]" : "border-black/15 text-[#8a7f98]"
+            }`}
+          >
+            {tv.playing ? "playing" : "paused"}
+          </span>
         </p>
-        <button onClick={onClose} className="rounded-full bg-white/15 px-2.5 py-0.5 text-[12px] font-bold hover:bg-white/25">
+        <button
+          onClick={onClose}
+          className="rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[#8a7f98] transition-colors hover:bg-black/[0.05] hover:text-[#4a3f55]"
+        >
           hide
         </button>
       </div>
@@ -389,7 +399,7 @@ export default function TvPanel({
       <div className="flex shrink-0 items-center gap-2 px-3 py-2.5">
         <button
           onClick={togglePlay}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ff8fab] text-white shadow transition-transform hover:scale-105 active:scale-95"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-[#3d3347] text-white transition-colors hover:bg-[#2e2735] active:scale-95"
           title={tv.playing ? "pause for everyone" : "play for everyone"}
           aria-label={tv.playing ? "pause for everyone" : "play for everyone"}
         >
@@ -397,7 +407,7 @@ export default function TvPanel({
         </button>
         <button
           onClick={() => changeVideo((tv.index + playlist.length - 1) % playlist.length)}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-[#efe8f7] text-[#4a3f55] transition-transform hover:scale-105 active:scale-95"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-white text-[#4a3f55] transition-colors hover:bg-black/[0.04] active:scale-95"
           title="previous"
           aria-label="previous video"
         >
@@ -405,7 +415,7 @@ export default function TvPanel({
         </button>
         <button
           onClick={() => changeVideo((tv.index + 1) % playlist.length)}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-[#efe8f7] text-[#4a3f55] transition-transform hover:scale-105 active:scale-95"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-white text-[#4a3f55] transition-colors hover:bg-black/[0.04] active:scale-95"
           title="next for everyone"
           aria-label="next video for everyone"
         >
@@ -417,8 +427,10 @@ export default function TvPanel({
         <button
           onClick={onToggleAudio}
           aria-pressed={audio}
-          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition-colors ${
-            audio ? "bg-[#ff8fab] text-white" : "bg-[#efe8f7] text-[#4a3f55] hover:bg-[#e4d9f2]"
+          className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-bold transition-colors ${
+            audio
+              ? "border-[#3d3347] bg-[#3d3347] text-white hover:bg-[#2e2735]"
+              : "border-black/10 bg-white text-[#4a3f55] hover:bg-black/[0.04]"
           }`}
           title={audio ? "stop hearing the room's TV" : "hear what the hall's TV is playing"}
         >
@@ -429,8 +441,10 @@ export default function TvPanel({
           onClick={onTogglePlayer}
           aria-expanded={playerOpen}
           disabled={!videoId}
-          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition-colors disabled:opacity-40 ${
-            playerOpen ? "bg-[#3d3347] text-white" : "bg-[#efe8f7] text-[#4a3f55] hover:bg-[#e4d9f2]"
+          className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-bold transition-colors disabled:opacity-40 ${
+            playerOpen
+              ? "border-[#3d3347] bg-[#3d3347] text-white hover:bg-[#2e2735]"
+              : "border-black/10 bg-white text-[#4a3f55] hover:bg-black/[0.04]"
           }`}
           title={
             playerOpen
@@ -442,12 +456,12 @@ export default function TvPanel({
           {playerOpen ? "close player" : "open player"}
         </button>
       </div>
-      <p className="shrink-0 px-4 pb-1 text-[10px] font-semibold leading-tight text-[#8a7f98]">
+      <p className="shrink-0 px-4 pb-1 pt-1 text-[10px] font-medium leading-tight text-[#a99cbb]">
         {playerOpen
           ? "you're watching this screen — seeks sync for the whole room"
           : "the picture plays on the hall's TV · open the player for seek & fullscreen"}
       </p>
-      <div className="flex shrink-0 items-center gap-2 px-4 pb-1">
+      <div className="flex shrink-0 items-center gap-2 px-4 pb-2.5 pt-1">
         <span className="relative flex h-2 w-2">
           <span className={`absolute h-full w-full rounded-full ${tv.playing ? "animate-ping bg-green-400" : "bg-black/15"}`} />
           <span className={`h-2 w-2 rounded-full ${tv.playing ? "bg-green-500" : "bg-black/20"}`} />
@@ -457,12 +471,14 @@ export default function TvPanel({
         </p>
       </div>
       {!compact && (
-        <div className="max-h-28 min-h-0 flex-1 overflow-y-auto border-t border-black/[0.06] px-3 py-2">
+        <div className="max-h-28 min-h-0 flex-1 overflow-y-auto border-t border-black/[0.08] px-3 py-2">
           {playlist.map((v, i) => (
             <button
               key={`${v.id}-${i}`}
               onClick={() => changeVideo(i)}
-              className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-[12px] font-medium transition-colors hover:bg-[#f6efe6] ${i === tv.index % playlist.length ? "bg-[#ffe9f0] font-bold text-[#c2437b]" : "text-[#4a3f55]"}`}
+              className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-[12px] font-medium transition-colors hover:bg-black/[0.04] ${
+                i === tv.index % playlist.length ? "bg-black/[0.05] font-bold text-[#3d3347]" : "text-[#4a3f55]"
+              }`}
             >
               <span className="flex w-4 shrink-0 justify-center">
                 {i === tv.index % playlist.length ? <Icon name="play" size={12} label="now playing" /> : `${i + 1}`}

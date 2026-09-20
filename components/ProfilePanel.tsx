@@ -42,11 +42,11 @@ export default function ProfilePanel({ initial, onSave, onClose }: Props) {
       aria-label="edit profile"
     >
       <div
-        className="my-auto max-h-[calc(100dvh_-_2rem)] w-full max-w-[560px] overflow-y-auto rounded-[28px] border border-white/70 bg-white/95 p-5 sm:p-6 text-center shadow-[0_24px_70px_-20px_rgba(60,40,80,0.5)]"
+        className="my-auto max-h-[calc(100dvh_-_2rem)] w-full max-w-[560px] overflow-y-auto rounded-[20px] border border-black/10 bg-white p-5 sm:p-6 text-center shadow-[0_24px_70px_-24px_rgba(30,25,40,0.35)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#a08fb5]">your look</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#a08fb5]">your look</p>
           <button
             onClick={onClose}
             aria-label="close profile"
@@ -66,7 +66,7 @@ export default function ProfilePanel({ initial, onSave, onClose }: Props) {
           placeholder="display name…"
           maxLength={14}
           autoFocus
-          className="mt-3 w-full rounded-2xl border border-[#e8dcc8] bg-[#fffaf2] px-4 py-3 text-center text-[15px] font-semibold text-[#3d3347] outline-none placeholder:font-normal placeholder:text-[#b9abcb] focus:border-[#ff8fab] focus:ring-4 focus:ring-[#ff8fab]/15"
+          className="mt-3 w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#3d3347] outline-none transition-colors placeholder:font-normal placeholder:text-[#b9abcb] focus:border-[#4a3f55] focus:ring-2 focus:ring-black/[0.06]"
         />
         <p className="mt-1.5 text-[11px] text-[#a99cbb]">friends see this name floating over you</p>
 
@@ -77,7 +77,7 @@ export default function ProfilePanel({ initial, onSave, onClose }: Props) {
         <button
           disabled={!name.trim()}
           onClick={save}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3.5 text-[15px] font-bold text-white shadow-lg transition-all hover:bg-[#2e2735] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30"
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3.5 text-[15px] font-bold text-white transition-colors hover:bg-[#2e2735] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30"
         >
           <Icon name="check" size={17} /> wear it
         </button>

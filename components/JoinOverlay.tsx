@@ -30,8 +30,8 @@ export default function JoinOverlay({ roomName, tagline, onJoin }: Props) {
 
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center overflow-y-auto bg-[#f6efe6]/60 p-4 backdrop-blur-[6px]">
-      <div className="my-auto max-h-[calc(100dvh_-_2rem)] w-full max-w-[560px] overflow-y-auto rounded-[28px] border border-white/70 bg-white/85 p-5 sm:p-6 text-center shadow-[0_24px_70px_-20px_rgba(120,90,140,0.35)]">
-        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#a08fb5]">private hall · 5–10 friends</p>
+      <div className="my-auto max-h-[calc(100dvh_-_2rem)] w-full max-w-[560px] overflow-y-auto rounded-[20px] border border-black/10 bg-white p-5 sm:p-6 text-center shadow-[0_24px_70px_-24px_rgba(30,25,40,0.35)]">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#a08fb5]">private hall · 5–10 friends</p>
         <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-[#3d3347]">{roomName}</h1>
         <p className="mt-1 text-sm text-[#8a7f98]">{tagline}</p>
 
@@ -44,7 +44,7 @@ export default function JoinOverlay({ roomName, tagline, onJoin }: Props) {
           placeholder="pick a nickname…"
           maxLength={14}
           autoFocus
-          className="mt-3 w-full rounded-2xl border border-[#e8dcc8] bg-[#fffaf2] px-4 py-3 text-center text-[15px] font-semibold text-[#3d3347] outline-none placeholder:font-normal placeholder:text-[#b9abcb] focus:border-[#ff8fab] focus:ring-4 focus:ring-[#ff8fab]/15"
+          className="mt-3 w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#3d3347] outline-none transition-colors placeholder:font-normal placeholder:text-[#b9abcb] focus:border-[#4a3f55] focus:ring-2 focus:ring-black/[0.06]"
         />
 
         <div className="mt-4">
@@ -54,7 +54,7 @@ export default function JoinOverlay({ roomName, tagline, onJoin }: Props) {
         <button
           disabled={!name.trim()}
           onClick={join}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3.5 text-[15px] font-bold text-white shadow-lg transition-all hover:bg-[#2e2735] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30"
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#3d3347] py-3.5 text-[15px] font-bold text-white transition-colors hover:bg-[#2e2735] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30"
         >
           step inside <Icon name="arrowRight" size={17} />
         </button>
