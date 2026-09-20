@@ -33,8 +33,9 @@ const BALL_SPAWN = layout.BALL_SPAWN;
 let ball = { x: BALL_SPAWN.x, z: BALL_SPAWN.z, y: 0.28, vx: 0, vy: 0, vz: 0, holderId: null };
 
 // ─── Hall carts (mini-game nº 4) — drivers simulate, server relays ────────
-// Two go-karts parked front-right. Only the current driver may move one;
-// everyone else renders the relayed state.
+// Go-karts parked front-right + one in the raceway (see CART_SPAWNS). Only
+// the current driver may move a driven one; everyone else renders the
+// relayed state.
 let carts = layout.CART_SPAWNS.map((s) => ({
   id: s.id,
   x: s.x,

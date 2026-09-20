@@ -319,4 +319,41 @@ ok("bridge: horizontal deck by the OG SPELL paint, joining road included", () =>
   assert.match(env, /for \(const b of BRIDGES\)/, "deck mesh built from data");
 });
 
+// ── 11 · every kart spawn is real: parked clear, enterable by id ─────────────
+ok("spawns: every CART_SPAWNS kart parks clear and hops in by id", () => {
+  const { CART_SPAWNS } = layout;
+  assert.ok(CART_SPAWNS.length >= 3, "hall pair + raceway kart");
+  const ids = new Set<string>();
+  for (const s of CART_SPAWNS) {
+    assert.ok(s.id && !ids.has(s.id), `kart id "${s.id}" unique`);
+    ids.add(s.id);
+    if (s.x < HALL.xMin) {
+      // raceway kart: inside the room with margin, off the ribbon, out of
+      // every wedge footprint, clear of props and the doorway lane
+      assert.ok(s.x > RACE.xMin + 1 && s.x < RACE.xMax - 1, `(${s.id}) inside west/east walls`);
+      assert.ok(s.z > RACE.zMin + 1 && s.z < RACE.zMax - 1, `(${s.id}) inside north/south walls`);
+      assert.ok(distToLoop(s.x, s.z) >= TRACK_WIDTH / 2 + 1.5, `(${s.id}) parks off the ribbon`);
+      for (const r of RAMPS) {
+        const rs = (s.x - r.x) * r.dx + (s.z - r.z) * r.dz;
+        const lat = Math.abs((s.x - r.x) * -r.dz + (s.z - r.z) * r.dx);
+        assert.ok(!(rs > -1 && rs < r.length + 1 && lat < r.width / 2 + 1.2), `(${s.id}) clear of a ramp footprint`);
+      }
+      for (const p of PROPS) {
+        if (p.x > HALL.xMin || (p.y0 != null && p.y0 > 0)) continue;
+        const pr = p.shape === "box" ? Math.max(p.hx, p.hz) : p.r;
+        assert.ok(Math.hypot(s.x - p.x, s.z - p.z) - pr >= 1.5, `(${s.id}) clear of the prop at (${p.x},${p.z})`);
+      }
+      assert.ok(!(s.x > -30 && s.x < -16 && s.z > 7.2 && s.z < 12.8), `(${s.id}) keeps the doorway lane open`);
+    }
+  }
+  // hop-in is id-generic end to end — no hardcoded kart list anywhere
+  const server = read("server.js");
+  const scene = read("components/HallScene.tsx");
+  const sock = read("lib/useHallSocket.ts");
+  for (const src of [server, scene, sock]) {
+    assert.ok(!src.includes('"cart-1"') && !src.includes('"cart-2"'), "no hardcoded kart ids — spawns work by id");
+  }
+  assert.match(server, /carts\.find\(\(c\) => c\.id === cartId\)/, "enter resolves any spawn id");
+});
+
 console.log(`\nPASS ${passed} checks — big door + bigger twisty circuit hold.`);

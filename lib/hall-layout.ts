@@ -31,10 +31,8 @@ export const LOUNGE = {
     { x: -4.4, z: -10.2, color: "#ffc6ff" },
     { x: 4.4, z: -9.8, color: "#9bf6ff" },
   ],
-  lamps: [
-    { x: -5.4, z: -5.8 },
-    { x: 5.4, z: -5.8 },
-  ],
+  // no flanking floor lamps — the sofa ends stay open
+  lamps: [],
 };
 export const SOS_SPOT = { x: 6.8, z: -16.4 };
 export const BOOKSHELF = { x: 12.5, z: -17.55 };
@@ -115,12 +113,17 @@ export const FLOOR_LAMPS = [...LOUNGE.lamps, NOOK.lamp, { x: -14, z: 12 }, { x: 
 export const SPAWN = { xSpread: 6, zMin: -3.6, zMax: -0.8 };
 export const BALL_SPAWN = { x: 3.4, z: -2.2 };
 
-// ── hall carts (front right, clear of the court + nook) ──
-// Two drivable go-karts, facing the middle of the room. Spots verified clear
-// of every static collider (4.5 m / 3.8 m clearance, 3.3 m apart).
+// ── hall carts: two parked front-right (clear of the court + nook), one in
+// the raceway's east paddock facing the circuit ──
+// Hall spots verified clear of every static collider (4.5 m / 3.8 m
+// clearance, 3.3 m apart); the raceway spot sits 8 m off the ribbon, clear
+// of ramps, props and the doorway lane. Everything simulates + relays from
+// this list (server carts, offline idles, hop-in zones), so no code counts
+// karts — add rows freely.
 export const CART_SPAWNS = [
   { id: "cart-1", x: 14.5, z: 1.0, facing: -Math.PI / 2, color: "#ff8fab" },
   { id: "cart-2", x: 17.0, z: 3.2, facing: -Math.PI / 2, color: "#4cc9f0" },
+  { id: "cart-3", x: -27, z: -10, facing: -Math.PI / 2, color: "#ffd166" },
 ];
 
 // ── wall art (admin-editable frames/posters hang on these planes) ──

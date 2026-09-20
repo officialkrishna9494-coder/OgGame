@@ -189,10 +189,11 @@ export interface ContextState {
   driving: boolean;
 }
 
-// ─── Hall carts (mini-game nº 4 — two drivable go-karts) ────────────────────
-// Parked on the right side of the hall. Hop in with E / ACT, steer with the
-// same keys as walking (or the joystick on mobile), hop out the same way.
-// The driver's client simulates its own cart; the server relays + validates.
+// ─── Hall carts (mini-game nº 4 — drivable go-karts) ─────────────────────────
+// Two parked on the right side of the hall, one in the raceway paddock. Hop
+// in with E / ACT, steer with the same keys as walking (or the joystick on
+// mobile), hop out the same way. The driver's client simulates its own cart;
+// the server relays + validates.
 export interface CartState {
   id: string;
   x: number;
