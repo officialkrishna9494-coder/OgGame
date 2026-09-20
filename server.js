@@ -346,6 +346,7 @@ app.prepare().then(() => {
       cart.driverId = socket.id;
       cart.speed = 0;
       cart.boost = 0;
+      cart.steer = 0;
       cart.y = 0;
       players.set(socket.id, { ...cur, cartId: cart.id, sitting: false, seat: null, seatMode: null });
       io.to("hall").emit("hall:toast", { text: `${cur.name} hopped in a cart!`, icon: "drive" });
@@ -360,6 +361,7 @@ app.prepare().then(() => {
       cart.speed = 0;
       // kill the exhaust too, or an emptied car keeps flaming on other screens
       cart.boost = 0;
+      cart.steer = 0;
       cart.y = 0;
       players.set(socket.id, { ...cur, cartId: null });
       dirty = true;
@@ -378,6 +380,8 @@ app.prepare().then(() => {
       cart.speed = Math.max(-3, Math.min(17, Number(d.speed) || 0));
       // 0…1 turbo blend: drives the exhaust flames on every other screen
       cart.boost = Math.max(0, Math.min(1, Number(d.boost) || 0));
+      // steering −1…1: animates the front wheels + cockpit wheel remotely
+      cart.steer = Math.max(-1, Math.min(1, Number(d.steer) || 0));
       // jump air over the raceway ramps, relayed like speed
       cart.y = Math.max(0, Math.min(4, Number(d.y) || 0));
       dirty = true;
@@ -643,6 +647,7 @@ app.prepare().then(() => {
         cart.driverId = null;
         cart.speed = 0;
         cart.boost = 0;
+        cart.steer = 0;
         cart.y = 0;
       }
       applyDodge(io, dodgeRef.leave(dodge, socket.id, leaving ? { x: leaving.x, z: leaving.z } : null, Date.now()));

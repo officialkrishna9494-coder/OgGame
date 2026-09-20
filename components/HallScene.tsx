@@ -13,6 +13,7 @@ import { HALL, RPS_SPOT, SOS_SPOT, SPAWN, TV, WALL_ART, ZONES, RACE, bridgeTopAt
 import { buildEnvironment, type CourtMode } from "./scene/environment";
 import { buildOutfit, disposeOutfit, OUTFIT_LABEL_Y, poseOutfit, setHairstyle, tintOutfit, type OutfitRig } from "./scene/outfits";
 import { buildCart, cartSeatOffset, disposeCart, poseCart, CART_RIDER_Y, type CartRig } from "./scene/carts";
+import { TurboSkids } from "./scene/skidmarks";
 import { drawIcon, drawIconText, type CanvasIcon } from "../lib/canvas-icons";
 import { actionAnchor, actionKey, promptAnchor } from "../lib/interaction";
 import { joyState, resetJoy } from "../lib/joy-state";
@@ -53,7 +54,7 @@ interface Props {
   onContext: (c: ContextState) => void;
   onCollect: (starId: string) => void;
   onHit: () => void;
-  onCartDrive: (c: { id: string; x: number; z: number; facing: number; speed: number; boost: number; y: number }) => void;
+  onCartDrive: (c: { id: string; x: number; z: number; facing: number; speed: number; boost: number; steer: number; y: number }) => void;
   onDodgePickup: (ballId: string) => void;
   onDodgeThrow: (ballId: string, b: DodgeThrow) => void;
   onDodgeSpend: (ballId: string, rev: number) => void;
@@ -478,6 +479,8 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
 
     // ── the hall itself: shell, lounge, café, fireplace nook, court, garden ──
     const env = buildEnvironment(scene);
+    // turbo burnout streaks — one shared trail per scene, fed per cart below
+    const skids = new TurboSkids(scene);
     let courtMode: CourtMode = "idle";
     let lastBoardSig = "";
 
@@ -1401,6 +1404,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             facing: Math.round(sim.facing * 100) / 100,
             speed: Math.round(sim.speed * 100) / 100,
             boost: Math.round(turboBlend * 100) / 100,
+            steer: Math.round(sim.steer * 100) / 100,
             y: Math.round(sim.y * 100) / 100,
           });
         }
@@ -2070,7 +2074,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             sim.facing += d * k;
           }
           sim.speed += (c.speed - sim.speed) * k;
-          sim.steer += (0 - sim.steer) * k;
+          // relayed wheel (−1…1) so rivals visibly steer; older servers omit
+          // it and those carts ease back to straight like before
+          sim.steer += ((c.steer ?? 0) - sim.steer) * k;
           sim.boost += ((c.boost ?? 0) - sim.boost) * k;
           // height rides the relay (ramps are static, so this is exact short
           // of mid-air frames, which ease in within a beat or two)
@@ -2080,7 +2086,21 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         rig.group.position.set(sim.x, sim.y, sim.z);
         rig.group.rotation.y = sim.facing;
         poseCart(rig, dt, { speed: sim.speed, steer: sim.steer, elapsed, boost: sim.boost });
+        // ── turbo tire marks: boosting + rolling + grounded lays a pair of
+        // burnout streaks off the rear axle; they fade out over ~2.6 s.
+        // Ground comes from the same heightfield the physics rides, so marks
+        // sit on ramps / the bridge deck — never floating, never mid-air.
+        {
+          const wedge = rampGroundAt(sim.x, sim.z);
+          const deckTop = bridgeTopAt(sim.x, sim.z);
+          const deck = deckTop > 0 && sim.y + 0.5 >= deckTop ? deckTop : 0;
+          const ground = Math.max(wedge, deck);
+          const laying =
+            sim.boost > 0.3 && Math.abs(sim.speed) > 3 && Math.abs(sim.vy) < 0.1 && sim.y <= ground + 0.12;
+          skids.lay(c.id, sim.x, sim.z, Math.max(sim.y, ground), sim.facing, laying);
+        }
       }
+      skids.update(dt);
       // ── raceway laps (my driven cart only): gates in travel order, clock
       // starts on the first line crossing, wrong-way resets with a cooldown.
       // Airborne karts (bridge deck, big jump air) never count gates — laps
@@ -2649,6 +2669,7 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
       document.removeEventListener("gesturechange", blockPageZoom);
       if (joy.owner === "canvas") resetJoy();
       env.dispose();
+      skids.dispose();
       for (const r of cartRigs.values()) {
         scene.remove(r.group);
         disposeCart(r);

@@ -15,6 +15,8 @@ export interface CartRig {
   wheels: THREE.Mesh[];
   /** steering pivots for the two front wheels (yaw) */
   steerPivots: THREE.Group[];
+  /** cockpit steering wheel spinner — rotated by rig.steer so it reads as real driving */
+  steerWheel: THREE.Group;
   /** turbo exhaust flames (outer, core, outer, core) — lit by CartPose.boost */
   flames: THREE.Mesh[];
   /** warm glow thrown by the flames while boosting */
@@ -169,10 +171,26 @@ export function buildCart(color: string): CartRig {
   const column = part(cyl(0.028, 0.42), trim, 0, 0.66, 0.2);
   column.rotation.x = 0.52;
   body.add(column);
-  const wheel = part(torus(0.19, 0.028), trim, 0, 0.9, 0.12);
-  wheel.rotation.x = -0.7;
-  body.add(wheel);
-  body.add(part(cyl(0.05, 0.06), chrome, 0, 0.9, 0.12));
+  // Cockpit wheel: an outer tilt group holds the real-world rake (-0.7 rad),
+  // the inner spinner turns around the column axis with the steering input.
+  // The rim alone would hide its own spin (a torus is symmetric), so a
+  // horizontal spoke + hub cap ride inside the spinner to make the rotation
+  // read at room scale — full lock ≈ ±110°.
+  const wheelTilt = new THREE.Group();
+  wheelTilt.position.set(0, 0.9, 0.12);
+  wheelTilt.rotation.x = -0.7;
+  body.add(wheelTilt);
+  const steerWheel = new THREE.Group();
+  wheelTilt.add(steerWheel);
+  const rim = part(torus(0.19, 0.028), trim);
+  steerWheel.add(rim);
+  const spoke = part(rb(0.32, 0.045, 0.03, 0.012), trim);
+  spoke.castShadow = false;
+  steerWheel.add(spoke);
+  const hubCap = part(cyl(0.05, 0.06), chrome);
+  hubCap.rotation.x = Math.PI / 2;
+  hubCap.castShadow = false;
+  steerWheel.add(hubCap);
 
   // wing mirrors
   for (const s of [-1, 1]) {
@@ -247,7 +265,7 @@ export function buildCart(color: string): CartRig {
   const owned = [paint, dark, trim, chrome, cushion, glass, lamp, tail, tireMat, hubMat, flameOuter, flameCore];
   group.userData.cartMats = owned;
 
-  return { group, body, wheels, steerPivots, flames, flameLight, mats: { paint, dark }, steer: 0, prevSpeed: 0 };
+  return { group, body, wheels, steerPivots, steerWheel, flames, flameLight, mats: { paint, dark }, steer: 0, prevSpeed: 0 };
 }
 
 export function disposeCart(rig: CartRig) {
@@ -279,6 +297,11 @@ export function poseCart(rig: CartRig, dt: number, p: CartPose): void {
   // which is why they used to slew opposite the turn. Negated to match.
   rig.steer = damp(rig.steer, p.steer, dt, 10);
   for (const pivot of rig.steerPivots) pivot.rotation.y = -rig.steer * 0.42;
+  // Cockpit wheel spins with the same smoothed steer: +steer (right) reads
+  // clockwise to the driver behind the rim (driver's right is −x), so the
+  // spinner takes the opposite sign of the front-wheel yaw above. Full lock
+  // ≈ ±1.9 rad (≈110°) like a real kart.
+  rig.steerWheel.rotation.z = rig.steer * 1.9;
   // lean into corners, squat under braking, tremble softly with speed
   const grip = Math.min(1, Math.abs(p.speed) / 6);
   const accel = dt > 0 ? (p.speed - rig.prevSpeed) / dt : 0;

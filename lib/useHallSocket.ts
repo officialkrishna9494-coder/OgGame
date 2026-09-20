@@ -312,7 +312,7 @@ export function useHallSocket(me: JoinInfo | null) {
   }, [emit]);
 
   const driveCart = useCallback(
-    (c: { id: string; x: number; z: number; facing: number; speed: number; boost?: number; y?: number }) => {
+    (c: { id: string; x: number; z: number; facing: number; speed: number; boost?: number; steer?: number; y?: number }) => {
       emit("cart:drive", c);
     },
     [emit]
