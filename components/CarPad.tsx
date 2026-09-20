@@ -3,7 +3,7 @@
 //
 //   LEFT thumb ........ straight ▲▼ pedals + round TURBO (ring meter, hold to
 //                      boost — TURBO alone also drives forward like a held ▲)
-//   RIGHT thumb ....... steer ◀ ▶ below the hop-out ACT
+//   RIGHT thumb ....... steer ◀ ▶ below ACT (throw while holding, else hop out)
 //   TOP-RIGHT ......... ⋯ menu (all other actions — lives in Hud, untouched)
 //
 // Buttons write the drivePad / turboState singletons with per-button pointer

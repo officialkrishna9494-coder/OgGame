@@ -1,9 +1,11 @@
 // ─── Cozy Hall · the one contextual action (ACT button · E key · prompt) ────
 // Single source of truth shared by the HUD (what the button says and does)
 // and the 3D scene (where the in-world prompt floats), so the two can never
-// disagree. Priority: hop out (driving) → SOS → throw (lobby ball or
-// dodgeball) → hop in (free cart) → add video (TV) → duel (RPS table) → star
-// game (rug, idle) → dodgeball (court pad, idle) → sofa sit / stand.
+// disagree. While driving: throw first when holding a ball (lobby or
+// dodgeball), otherwise hop out — a second press then exits. On foot:
+// SOS → throw (lobby ball or dodgeball) → hop in (free cart) → add video
+// (TV) → duel (RPS table) → star game (rug, idle) → dodgeball (court pad,
+// idle) → sofa sit / stand.
 
 import type { IconName } from "../components/icons";
 import { COURT, LOUNGE, RPS_SPOT, SOS_SPOT, TV } from "./hall-layout";
@@ -13,7 +15,7 @@ export type ActionKey = "sos" | "toss" | "drive" | "park" | "addLink" | "duel" |
 
 export interface ActionFlags {
   sitting: boolean;
-  /** I am driving a cart — E / ACT always means "hop out" first */
+  /** I am driving a cart — E / ACT throws a held ball first, else "hop out" */
   driving: boolean;
   gameStatus?: string;
   rpsStatus?: string;
@@ -41,7 +43,12 @@ export const HOLD_MS = 650;
 /** Allocation-free — the render loop calls this every frame. */
 export function actionKey(ctx: ContextState | undefined, f: ActionFlags): ActionKey | null {
   if (!ctx) return null;
-  if (f.driving) return "park";
+  // driving with a ball: ACT/E throws it first (a second press then hops
+  // out, since holding clears) — otherwise hop straight out
+  if (f.driving) {
+    if (ctx.holdingBall || ctx.holdingDodge) return "toss";
+    return "park";
+  }
   if (ctx.nearEmergency) return "sos";
   if (ctx.holdingBall || ctx.holdingDodge) return "toss";
   if (ctx.nearCart) return "drive";

@@ -140,9 +140,13 @@ ok("holdHandlers: momentary tap fires on press (jump latency), never throws with
 });
 
 // ── 3 · contextual action priority (ACT button + E key + 3D prompt agree) ────
-ok("actionKey: driving always wins (hop out first)", () => {
-  const ctx = { ...IDLE_CONTEXT, nearEmergency: true, holdingBall: true, nearCart: "c1" };
-  assert.equal(actionKey(ctx, { sitting: false, driving: true }), "park");
+ok("actionKey: driving with a ball throws first, second press hops out", () => {
+  const drive = { sitting: false, driving: true };
+  assert.equal(actionKey({ ...IDLE_CONTEXT, holdingBall: true }, drive), "toss");
+  assert.equal(actionKey({ ...IDLE_CONTEXT, holdingDodge: true }, drive), "toss");
+  assert.equal(actionKey({ ...IDLE_CONTEXT, holdingBall: true, nearEmergency: true }, drive), "toss");
+  assert.equal(actionKey(IDLE_CONTEXT, drive), "park");
+  assert.equal(actionKey({ ...IDLE_CONTEXT, nearEmergency: true }, drive), "park");
 });
 
 ok("actionKey: emergency > throw > hop-in > tv > duel > games > sofa", () => {

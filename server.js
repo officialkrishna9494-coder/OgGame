@@ -369,7 +369,24 @@ app.prepare().then(() => {
 
     socket.on("cart:drive", (d = {}) => {
       const cart = carts.find((c) => c.id === d.id);
-      if (!cart || cart.driverId !== socket.id) return; // only the driver moves it
+      if (!cart) return;
+      // bumper cars: anyone may shove a PARKED kart (bumper aftermath glides
+      // it and relays here) — driven karts still move only for their driver.
+      // Parked pushes keep no flames/steer and a tamer speed clamp, and never
+      // assign a driver, so a shove can't steal the seat.
+      if (!cart.driverId) {
+        if (cartDrivenBy(socket.id)) {
+          const cl = layout.clampToRooms(Number(d.x) || 0, Number(d.z) || 0, 0.8);
+          cart.x = cl.x;
+          cart.z = cl.z;
+          cart.facing = Number(d.facing) || 0;
+          cart.speed = Math.max(-8, Math.min(8, Number(d.speed) || 0));
+          cart.y = Math.max(0, Math.min(4, Number(d.y) || 0));
+          dirty = true;
+        }
+        return;
+      }
+      if (cart.driverId !== socket.id) return; // only the driver moves it
       // both rooms + the door gap (shared helper with the clients)
       const cl = layout.clampToRooms(Number(d.x) || 0, Number(d.z) || 0, 0.8);
       cart.x = cl.x;

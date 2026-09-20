@@ -21,6 +21,7 @@ import { drivePad } from "../lib/drive-pad";
 import { cycleViewMode, isFirstPerson, viewState } from "../lib/view-state";
 import { paintTvScreen, tvScreenAnchor } from "../lib/tv-screen";
 import { resetTurbo, turboState } from "../lib/turbo-state";
+import { bumpSfx } from "../lib/sfx";
 import { COLLIDERS, SOFA_SEATS } from "../lib/room-defaults";
 
 export interface DodgeThrow {
@@ -1038,6 +1039,10 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     // carts and rivals' carts ease toward the relayed snapshot every frame.
     let myCartId: string | null = null;
     const cartSim = new Map<string, { x: number; z: number; facing: number; speed: number; steer: number; boost: number; y: number; vy: number }>();
+    // slide velocity for shoved PARKED carts (bumper-car aftermath) — the
+    // bumper integrates + relays it while gliding so every screen watches
+    // the knocked kart slide instead of snapping back to its parking spot
+    const parkedShove = new Map<string, { vx: number; vz: number }>();
     // raceway lap tracker (my driven cart only): gates in travel order, the
     // clock starts crossing the line, wrong-way resets with a cooldown
     let cartLap = { next: 1, t0: 0, best: 0, wrongAt: 0, armed: -1 };
@@ -1046,6 +1051,8 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
     let turboBlend = 0;
     let lastNearCart: string | null = null;
     let lastCartDriveSent = 0;
+    let lastParkedPushSent = 0;
+    let lastBumpSfxAt = 0;
     let enterTween: { x: number; z: number; at: number } | null = null;
     const keys = new Set<string>();
     // typing in chat / admin inputs must never steer the character.
@@ -1192,6 +1199,9 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
           me.vy = 0;
         }
       }
+      // hopped out mid-shove: hands off the parked carts — the server holds
+      // the last relayed glide spot and the lerp below takes over cleanly
+      if (!myCartId && parkedShove.size > 0) parkedShove.clear();
       // every cart gets a display sim (the driven one stays authoritative)
       for (const c of st.carts) {
         if (c.id === myCartId || cartSim.has(c.id)) continue;
@@ -1307,17 +1317,69 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             bumped = true;
           }
         }
-        // the other cart is solid too
+        // bumper cars: the other kart is solid AND shovable. Overlap always
+        // separates; closing speed bounces me back with a thud and shoves
+        // the other kart — a driven rival wobbles here (their screen runs
+        // this same code mirrored and bounces their authoritative sim), a
+        // parked kart takes a slide velocity that gets relayed below.
+        let rebound: number | null = null;
         for (const [id, other] of cartSim) {
           if (id === myCartId) continue;
+          // different levels never touch (bridge deck vs infield floor)
+          if (Math.abs(sim.y - other.y) > 1.2) continue;
           const dx = nx - other.x;
           const dz = nz - other.z;
           const d = Math.hypot(dx, dz);
-          if (d < CART_RADIUS * 2 && d > 1e-4) {
-            nx = other.x + (dx / d) * CART_RADIUS * 2;
-            nz = other.z + (dz / d) * CART_RADIUS * 2;
-            bumped = true;
+          const minD = CART_RADIUS * 2;
+          if (d >= minD || d <= 1e-4) continue;
+          // impact normal, other → me
+          const anx = dx / d;
+          const anz = dz / d;
+          const overlap = minD - d;
+          // me out, fully — never inside the other kart
+          nx = other.x + anx * minD;
+          nz = other.z + anz * minD;
+          const snap = st.carts.find((c) => c.id === id);
+          const parked = !snap?.driverId;
+          const myVx = Math.sin(sim.facing) * sim.speed;
+          const myVz = Math.cos(sim.facing) * sim.speed;
+          const sh = parkedShove.get(id);
+          const oVx = parked ? (sh?.vx ?? 0) : Math.sin(other.facing) * other.speed;
+          const oVz = parked ? (sh?.vz ?? 0) : Math.cos(other.facing) * other.speed;
+          // approaching when the relative velocity points into the other kart
+          const closing = -((myVx - oVx) * anx + (myVz - oVz) * anz);
+          if (closing > 0.8) {
+            // bounce back + turn the nose away from the hit
+            rebound = -Math.min(6, Math.max(1.6, closing * 0.5));
+            const away = Math.atan2(anx, anz);
+            let turn = away - sim.facing;
+            while (turn > Math.PI) turn -= Math.PI * 2;
+            while (turn < -Math.PI) turn += Math.PI * 2;
+            sim.facing += Math.max(-0.3, Math.min(0.3, turn * 0.3));
+            // shove the other kart away from me, scaled by the hit
+            const push = Math.min(7, closing * (parked ? 0.75 : 0.45));
+            if (parked) {
+              parkedShove.set(id, { vx: -anx * push, vz: -anz * push });
+            } else {
+              other.x -= anx * overlap * 0.5;
+              other.z -= anz * overlap * 0.5;
+            }
+            const nowBump = performance.now();
+            if (closing > 1.6 && nowBump - lastBumpSfxAt > 350) {
+              lastBumpSfxAt = nowBump;
+              bumpSfx();
+            }
+          } else if (parked) {
+            // gentle graze — bleed the slide instead of stacking pushes
+            if (sh) {
+              sh.vx *= 0.5;
+              sh.vz *= 0.5;
+            }
+          } else {
+            other.x -= anx * overlap * 0.3;
+            other.z -= anz * overlap * 0.3;
           }
+          bumped = true;
         }
         // friends are soft — the cart shoves aside instead of mowing them down
         for (const [id, p] of Object.entries(st.players)) {
@@ -1349,6 +1411,8 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         // one frame-rate-proof scrub per frame — a graze bleeds momentum,
         // but the throttle always stays alive
         if (bumped) sim.speed *= Math.exp(-6 * dt);
+        // bumper-car rebound lands AFTER the scrub so the kick is exact
+        if (rebound !== null) sim.speed = rebound;
         sim.x = nx;
         sim.z = nz;
         // vertical — ramps carry, lips launch, gravity rules the air.
@@ -1407,6 +1471,70 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
             steer: Math.round(sim.steer * 100) / 100,
             y: Math.round(sim.y * 100) / 100,
           });
+        }
+        // slide shoved parked carts (bumper-car aftermath): friction, walls
+        // and furniture stop them — relayed ~10Hz while gliding so every
+        // screen watches the knocked kart instead of snapping it back
+        if (parkedShove.size > 0) {
+          let pushSent = false;
+          const canPush = driveNow - lastParkedPushSent > 100;
+          for (const [pid, sh] of parkedShove) {
+            const psim = cartSim.get(pid);
+            const psnap = st.carts.find((c) => c.id === pid);
+            // claimed mid-slide: hands off, the driver owns it now
+            if (!psim || psnap?.driverId) {
+              parkedShove.delete(pid);
+              continue;
+            }
+            const fr = Math.exp(-2.2 * dt);
+            sh.vx *= fr;
+            sh.vz *= fr;
+            const sp = Math.hypot(sh.vx, sh.vz);
+            if (sp < 0.25) {
+              parkedShove.delete(pid);
+              continue;
+            }
+            let px = psim.x + sh.vx * dt;
+            let pz = psim.z + sh.vz * dt;
+            for (const c of COLLIDERS) {
+              if (c.y1 < psim.y - 0.3 || (c.y0 ?? 0) > psim.y + 1.2) continue;
+              const cx = Math.max(c.x - c.hx, Math.min(px, c.x + c.hx));
+              const cz = Math.max(c.z - c.hz, Math.min(pz, c.z + c.hz));
+              const ddx = px - cx;
+              const ddz = pz - cz;
+              if (ddx * ddx + ddz * ddz < CART_RADIUS * CART_RADIUS) {
+                const dd = Math.hypot(ddx, ddz);
+                if (dd > 1e-6) {
+                  px = cx + (ddx / dd) * CART_RADIUS;
+                  pz = cz + (ddz / dd) * CART_RADIUS;
+                }
+                sh.vx *= 0.3;
+                sh.vz *= 0.3;
+              }
+            }
+            const cb = clampToRooms(px, pz, CART_RADIUS);
+            if (cb.x !== px || cb.z !== pz) {
+              sh.vx *= 0.3;
+              sh.vz *= 0.3;
+            }
+            psim.x = cb.x;
+            psim.z = cb.z;
+            psim.speed = sp; // rolls the wheels while it glides
+            if (canPush) {
+              pushSent = true;
+              cbRef.current.onCartDrive({
+                id: pid,
+                x: Math.round(psim.x * 100) / 100,
+                z: Math.round(psim.z * 100) / 100,
+                facing: Math.round(psim.facing * 100) / 100,
+                speed: Math.round(sp * 100) / 100,
+                boost: 0,
+                steer: 0,
+                y: Math.round(psim.y * 100) / 100,
+              });
+            }
+          }
+          if (pushSent) lastParkedPushSent = driveNow;
         }
       } else if (sitting) {
         me.vx = me.vz = 0;
@@ -2058,22 +2186,28 @@ export default function HallScene({ myName, myColor, myOutfit, myHairstyle, mySo
         }
         if (c.id !== myCartId) {
           const k = Math.min(1, dt * 6);
+          // a shoved parked kart is bumper-authoritative until its slide
+          // decays — easing toward the stale relay here would fight the
+          // push above and snap it back mid-glide
+          const shovedParked = parkedShove.has(c.id);
           // snap a fresh / teleported cart, ease everything else (no lerp lag
           // across the hall, no pop for sub-meter corrections)
-          if (Math.hypot(c.x - sim.x, c.z - sim.z) > 3) {
-            sim.x = c.x;
-            sim.z = c.z;
-            sim.facing = c.facing;
-            sim.y = c.y ?? 0;
-          } else {
-            sim.x += (c.x - sim.x) * k;
-            sim.z += (c.z - sim.z) * k;
-            let d = c.facing - sim.facing;
-            while (d > Math.PI) d -= Math.PI * 2;
-            while (d < -Math.PI) d += Math.PI * 2;
-            sim.facing += d * k;
+          if (!shovedParked) {
+            if (Math.hypot(c.x - sim.x, c.z - sim.z) > 3) {
+              sim.x = c.x;
+              sim.z = c.z;
+              sim.facing = c.facing;
+              sim.y = c.y ?? 0;
+            } else {
+              sim.x += (c.x - sim.x) * k;
+              sim.z += (c.z - sim.z) * k;
+              let d = c.facing - sim.facing;
+              while (d > Math.PI) d -= Math.PI * 2;
+              while (d < -Math.PI) d += Math.PI * 2;
+              sim.facing += d * k;
+            }
           }
-          sim.speed += (c.speed - sim.speed) * k;
+          if (!shovedParked) sim.speed += (c.speed - sim.speed) * k;
           // relayed wheel (−1…1) so rivals visibly steer; older servers omit
           // it and those carts ease back to straight like before
           sim.steer += ((c.steer ?? 0) - sim.steer) * k;

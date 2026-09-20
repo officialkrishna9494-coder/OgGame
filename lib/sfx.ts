@@ -43,6 +43,12 @@ export function startSfx() {
   [392, 523, 659].forEach((f, i) => blip(f, i * 0.09, 0.2, 0.08, "triangle"));
 }
 
+export function bumpSfx() {
+  // bumper-car thud — low + soft, scaled by impact at the call site
+  blip(120, 0, 0.16, 0.12, "triangle");
+  blip(82, 0.02, 0.2, 0.1, "sine");
+}
+
 export function sosSfx() {
   // two-tone alarm ×3
   for (let i = 0; i < 3; i++) {
